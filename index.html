@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+    <!-- ── Título y descripción ─────────────────────────────────────── -->
+    <title>Nimatel Check App</title>
+    <meta name="description" content="Protocolo de Cierre de Instalación y Avería — Nimatel Fibra y Telecomunicaciones" />
+    <meta name="application-name" content="Nimatel Check App" />
+    <meta name="author" content="Nimatel Fibra y Telecomunicaciones" />
+
+    <!-- ── PWA Manifest ─────────────────────────────────────────────── -->
+    <link rel="manifest" href="/manifest.json" />
+
+    <!-- ── Theme color (barra de estado Android) ────────────────────── -->
+    <meta name="theme-color" content="#b10925" />
+    <meta name="msapplication-TileColor" content="#b10925" />
+    <meta name="msapplication-TileImage" content="/icons/icon-144x144.png" />
+
+    <!-- ── iOS / Safari meta tags ───────────────────────────────────── -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <meta name="apple-mobile-web-app-title" content="NimatelCheck" />
+    <link rel="apple-touch-icon" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="72x72"   href="/icons/icon-72x72.png" />
+    <link rel="apple-touch-icon" sizes="96x96"   href="/icons/icon-96x96.png" />
+    <link rel="apple-touch-icon" sizes="128x128" href="/icons/icon-128x128.png" />
+    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144x144.png" />
+    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152x152.png" />
+    <link rel="apple-touch-icon" sizes="192x192" href="/icons/icon-192x192.png" />
+    <link rel="apple-touch-icon" sizes="512x512" href="/icons/icon-512x512.png" />
+
+    <!-- ── Favicon ───────────────────────────────────────────────────── -->
+    <link rel="icon" type="image/x-icon" href="/favicon.ico" />
+    <link rel="icon" type="image/png" sizes="192x192" href="/icons/icon-192x192.png" />
+
+    <!-- ── Open Graph (por si se comparte el enlace) ─────────────────── -->
+    <meta property="og:title" content="Nimatel Check App" />
+    <meta property="og:description" content="Protocolo de Cierre de Instalación y Avería" />
+    <meta property="og:image" content="/icons/icon-512x512.png" />
+    <meta property="og:type" content="website" />
+
+    <!-- ── Tailwind CSS (CDN) ────────────────────────────────────────── -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <style>
+      /* Evitar el rebote en iOS y ocultar la barra de scroll */
+      html, body {
+        overscroll-behavior: none;
+        -webkit-overflow-scrolling: touch;
+        overflow: hidden;
+        height: 100%;
+      }
+      #root {
+        height: 100%;
+        overflow-y: auto;
+      }
+      /* Área segura para notch y barra inferior en iOS */
+      body {
+        padding-top: env(safe-area-inset-top);
+        padding-bottom: env(safe-area-inset-bottom);
+      }
+    </style>
+  </head>
+  <body style="margin:0; background:#090608;">
+    <div id="root"></div>
+
+    <!-- ── Registro del Service Worker ──────────────────────────────── -->
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker
+            .register("/sw.js")
+            .then((reg) => console.log("[SW] Registrado:", reg.scope))
+            .catch((err) => console.warn("[SW] Error al registrar:", err));
+        });
+      }
+    </script>
+
+    <!-- React + ReactDOM + Babel (para desarrollo/StackBlitz) -->
+    <!-- En producción con Vite estos se eliminan automáticamente -->
+    <script type="module" src="/src/main.jsx"></script>
+  </body>
+</html>
