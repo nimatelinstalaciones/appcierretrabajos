@@ -64,7 +64,7 @@ function Toggle({ value, onChange, hasNA = false }) {
     <div className="flex gap-2">
       {opts.map(o => (
         <button key={String(o.v)} onClick={() => onChange(o.v)}
-          className="flex-1 py-3 rounded-xl font-bold text-sm tracking-wide transition-all duration-150 active:scale-95"
+          className="flex-1 py-2 rounded-lg font-bold text-sm tracking-wide transition-all duration-150 active:scale-95"
           style={value === o.v
             ? { background: o.on, color: "white", border: "2px solid transparent" }
             : { background: "rgba(15,10,11,0.6)", border: "1px solid #374151", color: "#9ca3af" }}>
@@ -78,7 +78,7 @@ function Toggle({ value, onChange, hasNA = false }) {
 // ─── Field Row ────────────────────────────────────────────────────────────
 function FieldRow({ label, sublabel, value, onChange, hasNA, required, badge }) {
   return (
-    <div className="rounded-2xl p-4 flex flex-col gap-3" style={cardStyle}>
+    <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1">
           <div className="flex items-center gap-2 flex-wrap">
@@ -86,7 +86,7 @@ function FieldRow({ label, sublabel, value, onChange, hasNA, required, badge }) 
             {required && <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>}
             {badge && <span className="text-[10px] font-bold text-sky-400 bg-sky-400/10 border border-sky-400/30 px-1.5 py-0.5 rounded-full tracking-widest uppercase">{badge}</span>}
           </div>
-          {sublabel && <p className="text-slate-400 text-xs mt-0.5 leading-snug">{sublabel}</p>}
+          {sublabel && <p className="text-slate-500 text-[10px] mt-0 leading-snug">{sublabel}</p>}
         </div>
         {value === true  && <span className="text-green-400 mt-0.5 shrink-0"><Icons.Check /></span>}
         {value === false && <span className="text-red-400 mt-0.5 shrink-0"><Icons.X /></span>}
@@ -105,14 +105,14 @@ function FilePicker({ label, sublabel, value, onChange }) {
     e.target.value = "";
   };
   return (
-    <div className="rounded-2xl p-4 flex flex-col gap-3" style={cardStyle}>
+    <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
       <div>
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-white font-semibold text-sm">{label}</p>
           <span className="text-[10px] font-bold text-slate-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full tracking-widest uppercase">Opcional</span>
           <span className="text-[10px] font-bold text-slate-500 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full tracking-widest">📁 Archivo</span>
         </div>
-        {sublabel && <p className="text-slate-400 text-xs mt-0.5">{sublabel}</p>}
+        {sublabel && <p className="text-slate-500 text-[10px] mt-0">{sublabel}</p>}
       </div>
       {value ? (
         <div className="relative rounded-xl overflow-hidden border border-green-500/30">
@@ -145,14 +145,14 @@ function CameraUploader({ label, sublabel, value, onChange }) {
   const remove = (i) => onChange(value.filter((_, idx) => idx !== i));
   const ok = value.length >= MIN_AFTER_PHOTOS;
   return (
-    <div className="rounded-2xl p-4 flex flex-col gap-3" style={cardStyle}>
+    <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
       <div>
         <div className="flex items-center gap-2 flex-wrap">
           <p className="text-white font-semibold text-sm">{label}</p>
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Mín. {MIN_AFTER_PHOTOS} fotos</span>
           <span className="text-[10px] font-bold text-sky-400 bg-sky-400/10 border border-sky-400/30 px-1.5 py-0.5 rounded-full">📷 Cámara</span>
         </div>
-        {sublabel && <p className="text-slate-400 text-xs mt-0.5">{sublabel}</p>}
+        {sublabel && <p className="text-slate-500 text-[10px] mt-0">{sublabel}</p>}
       </div>
 
       {/* Progress */}
@@ -203,19 +203,19 @@ function CameraUploader({ label, sublabel, value, onChange }) {
 function StepBar({ current }) {
   const labels = ["Inicio","Técnico","Limpieza","Evidencias","Cierre"];
   return (
-    <div className="flex items-start justify-between px-1">
+    <div className="flex items-center justify-between px-0.5">
       {labels.map((l, i) => {
         const s = i + 1, done = s < current, active = s === current;
         return (
-          <div key={l} className="flex flex-col items-center gap-1 flex-1">
+          <div key={l} className="flex flex-col items-center gap-0.5 flex-1">
             <div className="flex items-center w-full">
-              <div className="w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold shrink-0 transition-all"
+              <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 transition-all"
                 style={done ? { background: BRAND_RED, color: "white" } : active ? { background: "white", color: BRAND_RED } : { background: "#1e1e1e", color: "#6b7280" }}>
                 {done ? "✓" : s}
               </div>
-              {i < labels.length - 1 && <div className="flex-1 h-0.5 mx-1 rounded transition-all" style={{ background: done ? BRAND_RED : "#2d2d2d" }} />}
+              {i < labels.length - 1 && <div className="flex-1 h-px mx-0.5 rounded transition-all" style={{ background: done ? BRAND_RED : "#2d2d2d" }} />}
             </div>
-            <span className="text-[9px] font-semibold tracking-wide uppercase"
+            <span className="text-[8px] font-semibold tracking-wide uppercase leading-none"
               style={{ color: active ? "white" : done ? BRAND_RED : "#4b5563" }}>{l}</span>
           </div>
         );
@@ -434,14 +434,14 @@ function ReportScreen({ data, onReset }) {
   return (
     <div className="flex flex-col gap-4 pb-8">
       {/* Success header */}
-      <div className="rounded-2xl p-5 text-center" style={{ background: "linear-gradient(135deg,rgba(177,9,37,0.2),rgba(189,0,72,0.08))", border: "1px solid rgba(177,9,37,0.3)" }}>
+      <div className="rounded-xl p-3 text-center" style={{ background: "linear-gradient(135deg,rgba(177,9,37,0.2),rgba(189,0,72,0.08))", border: "1px solid rgba(177,9,37,0.3)" }}>
         <div className="text-4xl mb-2">✅</div>
         <h2 className="text-white text-xl font-black tracking-tight">Parte Completado</h2>
         <p className="text-slate-400 text-xs mt-1">Protocolo Nimatel registrado correctamente</p>
         {albaranRef && (
           <div className="mt-3 inline-flex flex-col items-center rounded-2xl px-5 py-2.5" style={{ background: "rgba(177,9,37,0.15)", border: "1px solid rgba(177,9,37,0.4)" }}>
             <p className="text-slate-400 text-xs uppercase tracking-widest font-semibold">Referencia Stel Order</p>
-            <p className="text-2xl font-black tracking-widest mt-0.5" style={{ color: BRAND_RED }}>{albaranRef}</p>
+            <p className="text-xl font-black tracking-widest mt-0.5" style={{ color: BRAND_RED }}>{albaranRef}</p>
             <p className="text-slate-500 text-xs mt-0.5">{data.s1.tipo} · {data.s1.tecnico?.split(" ")[0]} · {data.s1.fecha}</p>
           </div>
         )}
@@ -486,7 +486,7 @@ function ReportScreen({ data, onReset }) {
 
       {/* Stel Order attachment instructions */}
       {albaranRef && (
-        <div className="rounded-2xl p-4" style={{ background: "rgba(14,116,144,0.08)", border: "1px solid rgba(14,116,144,0.25)" }}>
+        <div className="rounded-xl p-2.5" style={{ background: "rgba(14,116,144,0.08)", border: "1px solid rgba(14,116,144,0.25)" }}>
           <p className="text-sky-400 font-bold text-sm mb-2">📎 Adjuntar a Stel Order</p>
           <p className="text-slate-400 text-xs leading-relaxed">
             Abre el {data.s1.docType === "Presupuesto" ? "presupuesto" : "albarán"} <span className="text-sky-300 font-bold">{albaranRef}</span> en Stel Order y adjunta:
@@ -502,11 +502,11 @@ function ReportScreen({ data, onReset }) {
       {/* Action buttons */}
       <div className="flex flex-col gap-3 mt-1">
         <button onClick={handlePDF} disabled={generating}
-          className="w-full py-4 font-black text-base rounded-2xl tracking-wide active:scale-95 transition-all flex items-center justify-center gap-2 text-white"
+          className="w-full py-3 font-black text-sm rounded-xl tracking-wide active:scale-95 transition-all flex items-center justify-center gap-2 text-white"
           style={{ background: generating ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT, boxShadow: "0 8px 24px rgba(177,9,37,0.3)" }}>
           {generating ? <><Icons.Spin />Generando PDF...</> : pdfDone ? <>✓ PDF Descargado — Generar de Nuevo</> : <><Icons.PDF />Generar y Descargar PDF</>}
         </button>
-        <button onClick={onReset} className="w-full py-3.5 font-bold text-sm rounded-2xl active:scale-95 transition-transform text-slate-300"
+        <button onClick={onReset} className="w-full py-2.5 font-bold text-sm rounded-xl active:scale-95 transition-transform text-slate-300"
           style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.1)" }}>
           ＋ Nuevo Parte de Servicio
         </button>
@@ -590,38 +590,36 @@ export default function App() {
     <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
       <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
 
-        {/* ── HEADER ── */}
-        <div className="px-5 pt-5 pb-4 sticky top-0 z-10" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderBottom:"1px solid rgba(177,9,37,0.2)" }}>
-          <div className="flex items-center gap-3 mb-5">
-            <img src={LOGO_SRC} alt="Nimatel" className="h-10 w-auto object-contain" />
-            <div className="border-l border-white/10 pl-3">
-              <p className="text-white font-black text-sm tracking-tight uppercase" style={{ letterSpacing:"0.05em" }}>Check App</p>
-              <p className="text-xs mt-0.5" style={{ color:BRAND_RED }}>Protocolo de Cierre · {today}</p>
-            </div>
+        {/* ── HEADER COMPACTO ── */}
+        <div className="px-3 py-2 sticky top-0 z-10 flex flex-col gap-1.5" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderBottom:"1px solid rgba(177,9,37,0.2)" }}>
+          <div className="flex items-center gap-2">
+            <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
+            <span className="text-white font-black text-xs tracking-widest uppercase opacity-80">Check App</span>
+            <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.25)" }}>{today}</span>
           </div>
           {!showReport && <StepBar current={step} />}
         </div>
 
         {/* ── CONTENT ── */}
-        <div className="flex-1 px-4 pt-4 pb-4 overflow-y-auto" style={{ maxHeight:"calc(100vh - 156px)" }}>
+        <div className="flex-1 px-4 pt-4 pb-4 overflow-y-auto" style={{ maxHeight:"calc(100vh - 90px)", overflowY:"auto" }}>
           {showReport ? (
             <ReportScreen data={{ s1,s2,s3,s4,s5 }} onReset={reset} />
           ) : (
-            <div className="flex flex-col gap-4 pb-4">
-              <div>
-                <h2 className="text-white font-black text-xl tracking-tight">{titles[step]}</h2>
-                <p className="text-slate-500 text-xs mt-0.5">{subtitles[step]}</p>
+            <div className="flex flex-col gap-2 pb-2">
+              <div className="pt-0.5 pb-0.5">
+                <h2 className="text-white font-black text-base tracking-tight leading-tight">{titles[step]}</h2>
+                <p className="text-slate-500 text-[10px] mt-0">{subtitles[step]}</p>
               </div>
 
               {/* STEP 1 */}
               {step===1 && (
-                <div className="flex flex-col gap-3">
-                  <div className="rounded-2xl p-4 flex flex-col gap-2" style={cardStyle}>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm flex items-center gap-2">
                       Técnico <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
                     </label>
                     <select value={s1.tecnico} onChange={e=>u1("tecnico",e.target.value)}
-                      className="w-full rounded-xl px-3 py-3 text-sm appearance-none focus:outline-none"
+                      className="w-full rounded-lg px-2.5 py-2 text-sm appearance-none focus:outline-none"
                       style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"}>
                       <option value="" style={{background:"#0a0a0a"}}>— Seleccionar técnico —</option>
                       {TECHNICIANS.map(t=><option key={t} style={{background:"#0a0a0a"}}>{t}</option>)}
@@ -630,7 +628,7 @@ export default function App() {
 
 
                   {/* Tipo de Documento */}
-                  <div className="rounded-2xl p-4 flex flex-col gap-3" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm flex items-center gap-2">
                       Tipo de Documento
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
@@ -638,9 +636,9 @@ export default function App() {
                     <div className="grid grid-cols-2 gap-3">
                       {DOC_TYPES.map(dt=>(
                         <button key={dt} onClick={()=>u1("docType",dt)}
-                          className="py-4 rounded-2xl font-black text-sm tracking-wide active:scale-95 flex flex-col items-center gap-1.5"
+                          className="py-2 rounded-xl font-bold text-xs tracking-wide active:scale-95 flex flex-col items-center gap-1"
                           style={s1.docType===dt ? {background:"rgba(177,9,37,0.2)",border:"2px solid #b10925",color:"#f87171"} : {background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:"#6b7280"}}>
-                          <span className="text-xl">{dt==="Albarán"?"📋":"📝"}</span>{dt}
+                          <span className="text-base">{dt==="Albarán"?"📋":"📝"}</span>{dt}
                           <span className="text-[9px] font-semibold opacity-70 tracking-widest">
                             {dt==="Albarán" ? "26alb-0XXX" : "26PRT-0XXX"}
                           </span>
@@ -650,14 +648,14 @@ export default function App() {
                   </div>
 
                   {/* Nº de documento */}
-                  <div className="rounded-2xl p-4 flex flex-col gap-2" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm flex items-center gap-2">
                       {s1.docType === "Presupuesto" ? "Nº de Presupuesto (Stel Order)" : "Nº de Albarán (Stel Order)"}
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
                     </label>
                     <input type="text" inputMode="numeric" value={s1.orden} onChange={e=>u1("orden",e.target.value)}
                       placeholder={s1.docType === "Presupuesto" ? "Ej: 142" : "Ej: 275"}
-                      className="w-full rounded-xl px-3 py-3 text-sm focus:outline-none"
+                      className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none"
                       style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
                     {albaranPreview && (
                       <div className="flex items-center gap-2 mt-1">
@@ -668,22 +666,22 @@ export default function App() {
                   </div>
 
                   {/* Fecha */}
-                  <div className="rounded-2xl p-4 flex items-center justify-between" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex items-center justify-between" style={cardStyle}>
                     <div><p className="text-white font-semibold text-sm">Fecha</p><p className="text-slate-500 text-xs mt-0.5">Automática</p></div>
                     <span className="font-bold text-sm rounded-xl px-3 py-1.5" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.3)" }}>{today}</span>
                   </div>
 
                   {/* Tipo de Servicio */}
-                  <div className="rounded-2xl p-4 flex flex-col gap-3" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm flex items-center gap-2">
                       Tipo de Servicio <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
                     </label>
                     <div className="grid grid-cols-2 gap-3">
                       {["Instalación","Avería"].map(tipo=>(
                         <button key={tipo} onClick={()=>u1("tipo",tipo)}
-                          className="py-5 rounded-2xl font-black text-base tracking-wide active:scale-95 flex flex-col items-center gap-1.5"
+                          className="py-2.5 rounded-xl font-bold text-sm tracking-wide active:scale-95 flex flex-col items-center gap-1"
                           style={s1.tipo===tipo ? {background:"rgba(177,9,37,0.2)",border:"2px solid #b10925",color:"#f87171"} : {background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:"#6b7280"}}>
-                          <span className="text-2xl">{tipo==="Instalación"?"⚡":"🔴"}</span>{tipo}
+                          <span className="text-lg">{tipo==="Instalación"?"⚡":"🔴"}</span>{tipo}
                         </button>
                       ))}
                     </div>
@@ -694,8 +692,8 @@ export default function App() {
 
               {/* STEP 2 */}
               {step===2 && (
-                <div className="flex flex-col gap-3">
-                  <div className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ background:"rgba(177,9,37,0.1)", border:"1px solid rgba(177,9,37,0.2)" }}>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-lg px-2.5 py-1.5 flex items-center gap-2" style={{ background:"rgba(177,9,37,0.1)", border:"1px solid rgba(177,9,37,0.2)" }}>
                     <span>🏅</span><p className="text-xs font-semibold text-red-300">Sello de Calidad Nimatel — Todos obligatorios</p>
                   </div>
                   <FieldRow label="Etiquetado Correcto" sublabel="¿Cables identificados en ambos extremos?" value={s2.etiquetado} onChange={v=>u2("etiquetado",v)} required />
@@ -708,8 +706,8 @@ export default function App() {
 
               {/* STEP 3 */}
               {step===3 && (
-                <div className="flex flex-col gap-3">
-                  <div className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ background:"rgba(14,116,144,0.1)", border:"1px solid rgba(14,116,144,0.25)" }}>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-lg px-2.5 py-1.5 flex items-center gap-2" style={{ background:"rgba(14,116,144,0.1)", border:"1px solid rgba(14,116,144,0.25)" }}>
                     <span>🧹</span><p className="text-xs font-semibold text-sky-400">Dejar el lugar como lo encontraste</p>
                   </div>
                   <FieldRow label="Residuos Retirados" sublabel="¿Restos de cable, polvo y cajas vacías retirados?" value={s3.residuos} onChange={v=>u3("residuos",v)} required />
@@ -720,8 +718,8 @@ export default function App() {
 
               {/* STEP 4 */}
               {step===4 && (
-                <div className="flex flex-col gap-3">
-                  <div className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ background:"rgba(88,28,135,0.15)", border:"1px solid rgba(126,34,206,0.25)" }}>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-lg px-2.5 py-1.5 flex items-center gap-2" style={{ background:"rgba(88,28,135,0.15)", border:"1px solid rgba(126,34,206,0.25)" }}>
                     <span>📱</span><p className="text-xs font-semibold text-purple-400">Evidencias para Stel Order</p>
                   </div>
                   <FilePicker
@@ -741,21 +739,21 @@ export default function App() {
 
               {/* STEP 5 */}
               {step===5 && (
-                <div className="flex flex-col gap-3">
-                  <div className="rounded-xl px-3 py-2 flex items-center gap-2" style={{ background:"rgba(22,163,74,0.1)", border:"1px solid rgba(22,163,74,0.25)" }}>
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-lg px-2.5 py-1.5 flex items-center gap-2" style={{ background:"rgba(22,163,74,0.1)", border:"1px solid rgba(22,163,74,0.25)" }}>
                     <span>🤝</span><p className="text-xs font-semibold text-green-400">Último paso — Cierre con el cliente</p>
                   </div>
                   <FieldRow label="Visto Bueno del Cliente" sublabel="¿El cliente ha comprobado que todo funciona?" value={s5.vistoBueno} onChange={v=>u5("vistoBueno",v)} required />
                   <FieldRow label="Firma del Albarán" sublabel="¿Tienes la firma digital del cliente en Stel Order?" value={s5.firma} onChange={v=>u5("firma",v)} required />
 
-                  <div className="rounded-2xl p-4 flex flex-col gap-2" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm flex items-center gap-2">
                       Método de Cobro <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
                     </label>
                     <div className="flex flex-col gap-2">
                       {PAYMENT_METHODS.map(m=>(
                         <button key={m} onClick={()=>u5("cobro",m)}
-                          className="py-3 px-4 rounded-xl text-sm font-semibold text-left active:scale-95 transition-all"
+                          className="py-2 px-3 rounded-lg text-xs font-semibold text-left active:scale-95 transition-all"
                           style={s5.cobro===m ? {background:"rgba(177,9,37,0.2)",border:`1.5px solid ${BRAND_RED}`,color:"#f87171"} : {background:"#0a0a0a",border:"1px solid #2d2d2d",color:"#9ca3af"}}>
                           {s5.cobro===m?"● ":"○ "}{m}
                         </button>
@@ -763,13 +761,13 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl p-4 flex flex-col gap-2" style={cardStyle}>
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
                     <label className="text-white font-semibold text-sm">
                       Observaciones <span className="text-slate-500 font-normal ml-1 text-xs">(Opcional)</span>
                     </label>
-                    <textarea value={s5.observaciones} onChange={e=>u5("observaciones",e.target.value)} rows={4}
+                    <textarea value={s5.observaciones} onChange={e=>u5("observaciones",e.target.value)} rows={3}
                       placeholder="Incidencias, trabajos pendientes, notas relevantes..."
-                      className="w-full rounded-xl px-3 py-3 text-sm focus:outline-none resize-none leading-relaxed"
+                      className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none resize-none leading-relaxed"
                       style={inputStyle}
                       onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
                   </div>
@@ -783,16 +781,16 @@ export default function App() {
 
         {/* ── FOOTER ── */}
         {!showReport && (
-          <div className="px-4 py-4 sticky bottom-0" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderTop:"1px solid rgba(177,9,37,0.15)" }}>
-            <div className="flex gap-3">
+          <div className="px-3 py-2.5 sticky bottom-0" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderTop:"1px solid rgba(177,9,37,0.15)" }}>
+            <div className="flex gap-2">
               {step > 1 && (
-                <button onClick={back} className="flex items-center gap-1.5 px-5 py-4 font-bold text-sm rounded-2xl active:scale-95 text-slate-300"
+                <button onClick={back} className="flex items-center gap-1.5 px-4 py-3 font-bold text-sm rounded-xl active:scale-95 text-slate-300"
                   style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>
                   <Icons.ChevL />Atrás
                 </button>
               )}
               <button onClick={next}
-                className="flex-1 flex items-center justify-center gap-2 py-4 font-black text-base rounded-2xl active:scale-95 text-white"
+                className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm rounded-xl active:scale-95 text-white"
                 style={{ background:BRAND_GRADIENT, boxShadow:"0 8px 20px rgba(177,9,37,0.3)" }}>
                 {step===TOTAL_STEPS ? <><Icons.ClipOk />Finalizar y Ver Reporte</> : <>Continuar<Icons.ChevR /></>}
               </button>
