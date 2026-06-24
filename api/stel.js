@@ -1,9 +1,10 @@
 // api/stel.js — Proxy para Stel Order API
+export const config = { api: { bodyParser: true } };
+
 export default async function handler(req, res) {
-  // CORS headers
-  res.setHeader("Access-Control-Allow-Origin", "https://appcierretrabajos.vercel.app");
+  res.setHeader("Access-Control-Allow-Origin", "*");
   res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type, X-AUTH-TOKEN");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
@@ -11,10 +12,9 @@ export default async function handler(req, res) {
   const STEL_BASE = "https://app.stelorder.com/app";
 
   try {
-    // El endpoint y params vienen en el body o query
     const { endpoint, method = "GET", body: reqBody } = req.body || {};
 
-    if (!endpoint) return res.status(400).json({ error: "Falta el parámetro endpoint" });
+    if (!endpoint) return res.status(400).json({ error: "Falta endpoint" });
 
     const url = `${STEL_BASE}/${endpoint}`;
     const options = {
@@ -22,8 +22,10 @@ export default async function handler(req, res) {
       headers: {
         "X-AUTH-TOKEN": STEL_API_KEY,
         "Content-Type": "application/json",
+        "Accept": "application/json",
       },
     };
+
     if (reqBody && method !== "GET") {
       options.body = JSON.stringify(reqBody);
     }
@@ -32,7 +34,7 @@ export default async function handler(req, res) {
     const text = await stelResp.text();
 
     let data;
-    try { data = JSON.parse(text); } catch { data = text; }
+    try { data = JSON.parse(text); } catch { data = { raw: text }; }
 
     return res.status(stelResp.status).json(data);
   } catch (err) {
