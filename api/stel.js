@@ -11,10 +11,26 @@ export default async function handler(req, res) {
   const STEL_API_KEY = process.env.STEL_API_KEY;
   const STEL_BASE = "https://app.stelorder.com/app";
 
-  try {
-    const { endpoint, method = "GET", body: reqBody } = req.body || {};
+  if (!STEL_API_KEY) {
+    return res.status(500).json({ error: "STEL_API_KEY no configurada en variables de entorno" });
+  }
 
-    if (!endpoint) return res.status(400).json({ error: "Falta endpoint" });
+  try {
+    // Parsear body manualmente si no viene parseado
+    let body = req.body;
+    if (typeof body === "string") {
+      try { body = JSON.parse(body); } catch { body = {}; }
+    }
+    if (!body) body = {};
+
+    const { endpoint, method = "GET", body: reqBody } = body;
+
+    if (!endpoint) {
+      return res.status(400).json({ 
+        error: "Falta endpoint",
+        received_body: JSON.stringify(body).substring(0, 200)
+      });
+    }
 
     const url = `${STEL_BASE}/${endpoint}`;
     const options = {
