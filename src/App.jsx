@@ -52,85 +52,72 @@ const loadGoogleAPI = () => new Promise((resolve) => {
 });
 
 const getGoogleToken = () => new Promise(async (resolve, reject) => {
-  await loadGoogleAPI();
-  const client = window.google.accounts.oauth2.initTokenClient({
-    client_id: GOOGLE_CLIENT_ID,
-    scope: SCOPES,
-    callback: (resp) => {
-      if (resp.error) reject(new Error(resp.error));
-      else resolve(resp.access_token);
-    },
-  });
-  client.requestAccessToken();
+  try {
+    await loadGoogleAPI();
+    const client = window.google.accounts.oauth2.initTokenClient({
+      client_id: GOOGLE_CLIENT_ID,
+      scope: SCOPES,
+      callback: (resp) => {
+        if (resp.error) {
+          reject(new Error(`Error de autenticación Google: ${resp.error} — ${resp.error_description || ""}`));
+        } else {
+          resolve(resp.access_token);
+        }
+      },
+      error_callback: (err) => {
+        reject(new Error(`Error OAuth: ${err.type || JSON.stringify(err)}`));
+      },
+    });
+    client.requestAccessToken({ prompt: "consent" });
+  } catch (err) {
+    reject(new Error(`Error cargando Google API: ${err.message}`));
+  }
 });
 
-// ─── Upload PDF to Google Drive ──────────────────────────────────────────
+// ─── Upload PDF to Google Drive (via Vercel proxy) ───────────────────────
 const uploadToDrive = async (pdfBlob, filename, accessToken) => {
-  // Create folder "Nimatel Check App" if not exists, then upload
-  // First, search for existing folder
-  const searchResp = await fetch(
-    `https://www.googleapis.com/drive/v3/files?q=name%3D'Nimatel+Check+App'+and+mimeType%3D'application%2Fvnd.google-apps.folder'+and+trashed%3Dfalse&fields=files(id)`,
-    { headers: { Authorization: `Bearer ${accessToken}` } }
-  );
-  const searchData = await searchResp.json();
-  let folderId;
+  // Convertir blob a base64 para enviar al proxy
+  const arrayBuffer = await pdfBlob.arrayBuffer();
+  const bytes = new Uint8Array(arrayBuffer);
+  let binary = "";
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  const pdfBase64 = btoa(binary);
 
-  if (searchData.files && searchData.files.length > 0) {
-    folderId = searchData.files[0].id;
-  } else {
-    // Create folder
-    const folderResp = await fetch("https://www.googleapis.com/drive/v3/files", {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ name: "Nimatel Check App", mimeType: "application/vnd.google-apps.folder" }),
-    });
-    const folderData = await folderResp.json();
-    folderId = folderData.id;
-  }
-
-  // Upload the PDF
-  const metadata = { name: filename, mimeType: "application/pdf", parents: [folderId] };
-  const form = new FormData();
-  form.append("metadata", new Blob([JSON.stringify(metadata)], { type: "application/json" }));
-  form.append("file", pdfBlob, filename);
-
-  const uploadResp = await fetch(
-    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,webContentLink",
-    { method: "POST", headers: { Authorization: `Bearer ${accessToken}` }, body: form }
-  );
-  const uploadData = await uploadResp.json();
-  if (!uploadData.id) throw new Error("Error al subir a Drive: " + JSON.stringify(uploadData));
-
-  // Make it publicly readable
-  await fetch(`https://www.googleapis.com/drive/v3/files/${uploadData.id}/permissions`, {
+  const resp = await fetch("/api/drive-upload", {
     method: "POST",
-    headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ role: "reader", type: "anyone" }),
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ accessToken, filename, pdfBase64 }),
   });
-
-  // Get direct download link
-  const publicUrl = `https://drive.google.com/uc?export=download&id=${uploadData.id}`;
-  return { fileId: uploadData.id, publicUrl };
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+    throw new Error(err.error || `Error proxy Drive: ${resp.status}`);
+  }
+  return await resp.json(); // { fileId, publicUrl, folderId }
 };
 
-// ─── Get Stel Order document ID from reference ────────────────────────────
+// ─── Get Stel Order document ID (via Vercel proxy) ───────────────────────
+const stelProxy = async (endpoint, method = "GET", body = null) => {
+  const resp = await fetch("/api/stel", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ endpoint, method, body }),
+  });
+  if (!resp.ok) {
+    const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
+    throw new Error(err.error || `Error proxy Stel: ${resp.status}`);
+  }
+  return await resp.json();
+};
+
 const getStelDocId = async (orden, docType) => {
   const num = orden.trim().replace(/\D/g, "");
   const endpoint = docType === "Presupuesto" ? "workEstimates" : "workDeliveryNotes";
   const entityType = docType === "Presupuesto" ? "WORKESTIMATE" : "WORKDELIVERYNOTE";
-
-  // Try with numeric reference first
-  const resp = await fetch(`${STEL_BASE}/${endpoint}?reference=${num}&limit=100`, {
-    headers: { "X-AUTH-TOKEN": STEL_API_KEY, "Content-Type": "application/json" },
-  });
-
-  if (!resp.ok) throw new Error(`Error Stel Order API: ${resp.status}`);
-  const data = await resp.json();
-
-  // Try exact match on full-reference
   const albaranRef = getDocRef(orden, docType);
-  let doc = null;
 
+  // Buscar por referencia numérica
+  const data = await stelProxy(`${endpoint}?reference=${num}&limit=100`);
+  let doc = null;
   if (Array.isArray(data)) {
     doc = data.find(d => d["full-reference"] === albaranRef) || data[0];
   } else if (data.data && Array.isArray(data.data)) {
@@ -138,11 +125,8 @@ const getStelDocId = async (orden, docType) => {
   }
 
   if (!doc) {
-    // Try fetching last 100 and searching
-    const resp2 = await fetch(`${STEL_BASE}/${endpoint}?limit=100&sort=id&order=desc`, {
-      headers: { "X-AUTH-TOKEN": STEL_API_KEY, "Content-Type": "application/json" },
-    });
-    const data2 = await resp2.json();
+    // Buscar entre los últimos 100
+    const data2 = await stelProxy(`${endpoint}?limit=100&sort=id&order=desc`);
     const list = Array.isArray(data2) ? data2 : (data2.data || []);
     doc = list.find(d => d["full-reference"] === albaranRef);
   }
@@ -151,18 +135,14 @@ const getStelDocId = async (orden, docType) => {
   return { id: doc.id, entityType };
 };
 
-// ─── Attach PDF to Stel Order ─────────────────────────────────────────────
+// ─── Attach PDF to Stel Order (via Vercel proxy) ─────────────────────────
 const attachToStelOrder = async (fileUrl, entityId, entityType, filename) => {
-  const resp = await fetch(`${STEL_BASE}/entityAttachments`, {
-    method: "POST",
-    headers: { "X-AUTH-TOKEN": STEL_API_KEY, "Content-Type": "application/json; charset=utf-8" },
-    body: JSON.stringify({ "file-url": fileUrl, "entity-id": entityId, "entity-type": entityType, "name": filename }),
+  return await stelProxy("entityAttachments", "POST", {
+    "file-url": fileUrl,
+    "entity-id": entityId,
+    "entity-type": entityType,
+    "name": filename,
   });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error(`Error al adjuntar en Stel Order: ${resp.status} — ${errText}`);
-  }
-  return await resp.json();
 };
 
 // ─── Icons ───────────────────────────────────────────────────────────────
@@ -636,6 +616,14 @@ function ReportScreen({ data, onReset }) {
     if (v === true)  return <span className="text-green-400 font-bold">✓ Sí</span>;
     if (v === false) return <span className="text-red-400 font-bold">✗ No</span>;
     if (v === "na")  return <span className="text-slate-400">N/A</span>;
+    // JSX element (React element) — devolver directamente
+    if (v !== null && typeof v === "object" && v.$$typeof) return v;
+    // Array de fotos
+    if (Array.isArray(v)) {
+      if (v.length === 0) return <span className="text-slate-500 italic">No adjunta</span>;
+      return <span className="text-sky-400 font-bold">{v.length} foto(s)</span>;
+    }
+    // Objeto con name (foto individual legacy)
     if (typeof v === "object" && v.name) return <span className="text-sky-400 text-xs">{v.name}</span>;
     return <span className="text-white">{String(v)}</span>;
   };
