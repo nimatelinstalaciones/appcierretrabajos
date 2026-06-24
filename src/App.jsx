@@ -236,8 +236,8 @@ function FieldRow({ label, sublabel, value, onChange, hasNA, required, badge }) 
 function FilePicker({ label, sublabel, value, onChange }) {
   const ref = useRef();
   const handleFile = (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    onChange({ name: f.name, url: URL.createObjectURL(f), file: f });
+    const files = Array.from(e.target.files); if (!files.length) return;
+    onChange(files.map(f => ({ name: f.name, url: URL.createObjectURL(f), file: f })));
     e.target.value = "";
   };
   return (
@@ -249,13 +249,20 @@ function FilePicker({ label, sublabel, value, onChange }) {
         </div>
         {sublabel && <p className="text-slate-500 text-[10px] mt-0">{sublabel}</p>}
       </div>
-      {value ? (
-        <div className="relative rounded-xl overflow-hidden border border-green-500/30">
-          <img src={value.url} alt="before" className="w-full h-32 object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/70 to-transparent flex items-end p-2">
-            <p className="text-white text-xs truncate flex-1">{value.name}</p>
-            <button onClick={() => onChange(null)} className="text-red-400 text-xs ml-2 font-semibold">✕</button>
+      {value && value.length > 0 ? (
+        <div className="flex flex-col gap-2">
+          <div className="grid grid-cols-3 gap-2">
+            {value.map((p, i) => (
+              <div key={i} className="relative rounded-xl overflow-hidden aspect-square">
+                <img src={p.url} alt={`antes ${i+1}`} className="w-full h-full object-cover" />
+                <div className="absolute inset-0 bg-black/40 flex items-start justify-between p-1">
+                  <span className="text-white text-[10px] font-bold bg-black/50 rounded px-1">#{i+1}</span>
+                  <button onClick={() => onChange(value.filter((_,idx) => idx !== i))} className="text-red-400 bg-black/50 rounded text-[10px] font-bold px-1">✕</button>
+                </div>
+              </div>
+            ))}
           </div>
+          <button onClick={() => onChange(null)} className="text-red-400 text-xs text-center py-1 font-semibold">Eliminar todas</button>
         </div>
       ) : (
         <button onClick={() => ref.current.click()}
@@ -264,7 +271,7 @@ function FilePicker({ label, sublabel, value, onChange }) {
           <Icons.Folder /><span className="font-semibold text-sm">Seleccionar de Archivos / Galería</span>
         </button>
       )}
-      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
     </div>
   );
 }
@@ -273,8 +280,8 @@ function FilePicker({ label, sublabel, value, onChange }) {
 function CameraUploader({ label, sublabel, value, onChange }) {
   const ref = useRef();
   const handleFile = (e) => {
-    const f = e.target.files[0]; if (!f) return;
-    onChange([...value, { name: f.name, url: URL.createObjectURL(f), file: f }]);
+    const files = Array.from(e.target.files); if (!files.length) return;
+    onChange([...value, ...files.map(f => ({ name: f.name, url: URL.createObjectURL(f), file: f }))]);
     e.target.value = "";
   };
   const remove = (i) => onChange(value.filter((_, idx) => idx !== i));
@@ -322,7 +329,7 @@ function CameraUploader({ label, sublabel, value, onChange }) {
             : "Añadir Foto Adicional"}
         </span>
       </button>
-      <input ref={ref} type="file" accept="image/*" className="hidden" onChange={handleFile} />
+      <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={handleFile} />
     </div>
   );
 }
@@ -436,7 +443,7 @@ async function buildPDF(data) {
   nl(4);
 
   secHeader("4. Gestión Stel Order");
-  fRow("Foto del Antes adjuntada", data.s4.fotoAntes ? "✓ Sí — " + data.s4.fotoAntes.name : "No adjunta");
+  fRow("Foto del Antes adjuntada", data.s4.fotoAntes && data.s4.fotoAntes.length > 0 ? `✓ Sí — ${data.s4.fotoAntes.length} foto(s)` : "No adjunta");
   fRow("Fotos del Después (nº)", `${data.s4.fotosDepues.length} foto(s) adjuntas`);
   fRow("Material Añadido al Albarán", data.s4.materiales);
   fRow("Descripción Técnica Registrada", data.s4.descripcion);
@@ -457,7 +464,9 @@ async function buildPDF(data) {
   nl(8);
 
   const allPhotos = [];
-  if (data.s4.fotoAntes) allPhotos.push({ label: "Foto del Antes", photo: data.s4.fotoAntes });
+  if (data.s4.fotoAntes && data.s4.fotoAntes.length > 0) {
+    data.s4.fotoAntes.forEach((p, i) => allPhotos.push({ label: `Foto del Antes #${i+1}`, photo: p }));
+  }
   data.s4.fotosDepues.forEach((p, i) => allPhotos.push({ label: `Foto del Después #${i+1}`, photo: p }));
 
   if (allPhotos.length > 0) {
@@ -649,7 +658,9 @@ function ReportScreen({ data, onReset }) {
       ["Residuos", data.s3.residuos], ["Herramientas", data.s3.herramientas], ["Material Sobrante", data.s3.material],
     ]},
     { title: "Stel Order", icon: "📱", rows: [
-      ["Foto Antes", data.s4.fotoAntes ? <span className="text-sky-400 text-xs">{data.s4.fotoAntes.name}</span> : <span className="text-slate-500 italic">No adjunta</span>],
+      ["Foto Antes", data.s4.fotoAntes && data.s4.fotoAntes.length > 0
+        ? <span className="text-sky-400 text-xs">{data.s4.fotoAntes.length} foto(s)</span>
+        : <span className="text-slate-500 italic">No adjunta</span>],
       ["Fotos Después", <span className="text-green-400 font-bold">{data.s4.fotosDepues.length} foto(s)</span>],
       ["Material en albarán", data.s4.materiales], ["Descripción técnica", data.s4.descripcion],
     ]},
@@ -740,7 +751,7 @@ export default function App() {
   const [s1, setS1] = useState({ tecnico:"", orden:"", fecha:today, tipo:"", docType:"" });
   const [s2, setS2] = useState({ etiquetado:null, peinado:null, config:null, test:null, cierre:null });
   const [s3, setS3] = useState({ residuos:null, herramientas:null, material:null });
-  const [s4, setS4] = useState({ fotoAntes:null, fotosDepues:[], materiales:null, descripcion:null });
+  const [s4, setS4] = useState({ fotoAntes:[], fotosDepues:[], materiales:null, descripcion:null });
   const [s5, setS5] = useState({ vistoBueno:null, firma:null, cobro:"", observaciones:"" });
 
   const u1 = (k,v) => setS1(p=>({...p,[k]:v}));
@@ -793,7 +804,7 @@ export default function App() {
     setS1({tecnico:"",orden:"",fecha:today,tipo:"",docType:""});
     setS2({etiquetado:null,peinado:null,config:null,test:null,cierre:null});
     setS3({residuos:null,herramientas:null,material:null});
-    setS4({fotoAntes:null,fotosDepues:[],materiales:null,descripcion:null});
+    setS4({fotoAntes:[],fotosDepues:[],materiales:null,descripcion:null});
     setS5({vistoBueno:null,firma:null,cobro:"",observaciones:""});
   };
 
@@ -809,6 +820,7 @@ export default function App() {
           <div className="flex items-center gap-2">
             <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
             <span className="text-white font-black text-xs tracking-widest uppercase opacity-80">Check App</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color:"#64748b", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>V1.2</span>
             <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.25)" }}>{today}</span>
           </div>
           {!showReport && <StepBar current={step} />}
