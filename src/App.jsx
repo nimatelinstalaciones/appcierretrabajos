@@ -21,7 +21,7 @@ const getDocRef = (orden, docType) => {
   const yr = new Date().getFullYear().toString().slice(-2);
   const num = orden.trim().replace(/\D/g, "");
   if (!num) return null;
-  const prefix = docType === "Presupuesto" ? `${yr}PRT` : `${yr}alb`;
+  const prefix = docType === "Presupuesto" ? `${yr}PRT` : `${yr}ALB`;
   return `${prefix}-0${num}`;
 };
 
@@ -115,23 +115,27 @@ const getStelDocId = async (orden, docType) => {
   const entityType = docType === "Presupuesto" ? "WORKESTIMATE" : "WORKDELIVERYNOTE";
   const albaranRef = getDocRef(orden, docType);
 
+  const toList = (d) => Array.isArray(d) ? d : (d && Array.isArray(d.data) ? d.data : []);
+  const findDoc = (list) => list.find(d => d["full-reference"] === albaranRef);
+
   // Buscar por referencia numérica
-  const data = await stelProxy(`${endpoint}?reference=${num}&limit=100`);
-  let doc = null;
-  if (Array.isArray(data)) {
-    doc = data.find(d => d["full-reference"] === albaranRef) || data[0];
-  } else if (data.data && Array.isArray(data.data)) {
-    doc = data.data.find(d => d["full-reference"] === albaranRef) || data.data[0];
-  }
+  const data1 = await stelProxy(`${endpoint}?reference=${num}&limit=100`);
+  const list1 = toList(data1);
+  let doc = findDoc(list1);
 
+  // Si no, buscar entre los últimos 100 por full-reference
   if (!doc) {
-    // Buscar entre los últimos 100
     const data2 = await stelProxy(`${endpoint}?limit=100&sort=id&order=desc`);
-    const list = Array.isArray(data2) ? data2 : (data2.data || []);
-    doc = list.find(d => d["full-reference"] === albaranRef);
+    doc = findDoc(toList(data2));
   }
 
-  if (!doc) throw new Error(`No se encontró el documento ${albaranRef} en Stel Order`);
+  // Si no, buscar con el número exacto sin cero delante
+  if (!doc) {
+    const data3 = await stelProxy(`${endpoint}?reference=${parseInt(num)}&limit=10`);
+    doc = findDoc(toList(data3)) || toList(data3)[0];
+  }
+
+  if (!doc) throw new Error(`No se encontró ${albaranRef} en Stel Order. Comprueba el número de ${docType === "Presupuesto" ? "presupuesto" : "albarán"}.`);
   return { id: doc.id, entityType };
 };
 
