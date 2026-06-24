@@ -8,7 +8,7 @@ export default async function handler(req, res) {
 
   if (req.method === "OPTIONS") return res.status(200).end();
 
-  const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
+  const STEL_API_KEY = process.env.STEL_API_KEY;
   const STEL_BASE = "https://app.stelorder.com/app";
 
   try {
