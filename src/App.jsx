@@ -515,7 +515,8 @@ function StelIntegrationPanel({ data }) {
 
       // 5. Attach to Stel Order
       setStatusMsg("Adjuntando a Stel Order...");
-      await attachToStelOrder(publicUrl, entityId, entityType, filename);
+const cleanUrl = `${window.location.origin}/api/file/${encodeURIComponent(filename)}?id=${fileId}`;
+      await attachToStelOrder(cleanUrl, entityId, entityType, filename);
 
       setStatus("success");
       setStatusMsg(`✓ PDF adjuntado correctamente al ${data.s1.docType} ${albaranRef}`);
