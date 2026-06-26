@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     const options = {
       method,
       headers: {
-        "X-AUTH-TOKEN": STEL_API_KEY,
+        "APIKEY": STEL_API_KEY,
         "Content-Type": "application/json",
         "Accept": "application/json",
       },
