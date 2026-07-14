@@ -10,6 +10,8 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
+const APP_VERSION = "V1.3";
+const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
 const DOC_TYPES = ["Albarán", "Presupuesto"];
@@ -732,7 +734,7 @@ function ReportScreen({ data, onReset }) {
 }
 
 // ─── Main App ─────────────────────────────────────────────────────────────
-export default function App() {
+function ChecklistApp({ onHome }) {
   const today = new Date().toLocaleDateString("es-ES", { day:"2-digit", month:"2-digit", year:"numeric" });
   const [step, setStep] = useState(1);
   const [showReport, setShowReport] = useState(false);
@@ -809,8 +811,9 @@ export default function App() {
           <div className="flex items-center gap-2">
             <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
             <span className="text-white font-black text-xs tracking-widest uppercase opacity-80">Check App</span>
-            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color:"#64748b", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>V1.2</span>
-            <span className="ml-auto text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.25)" }}>{today}</span>
+            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color:"#64748b", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>{APP_VERSION}</span>
+            <button onClick={onHome} className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full active:scale-95" style={{ color:"#9ca3af", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>⌂ Inicio</button>
+            <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.25)" }}>{today}</span>
           </div>
           {!showReport && <StepBar current={step} />}
         </div>
@@ -989,4 +992,223 @@ export default function App() {
       </div>
     </div>
   );
+}
+
+
+// ─── V1.3 · Solicitud de Material — Fase 2: buscador de catálogo + carrito ──
+function MaterialApp({ onHome }) {
+  const today = new Date().toLocaleDateString("es-ES", { day:"2-digit", month:"2-digit", year:"numeric" });
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState([]);
+  const [searching, setSearching] = useState(false);
+  const [searched, setSearched] = useState(false);
+  const [searchError, setSearchError] = useState("");
+  const [cart, setCart] = useState([]);
+
+  const toList = (d) => Array.isArray(d) ? d : (d && Array.isArray(d.data) ? d.data : []);
+
+  const doSearch = async () => {
+    const q = query.trim();
+    if (q.length < 2) { setSearchError("Escribe al menos 2 caracteres para buscar."); return; }
+    setSearching(true); setSearchError(""); setSearched(false); setResults([]);
+    try {
+      const enc = encodeURIComponent(q);
+      const [byName, byRef] = await Promise.all([
+        stelProxy(`products?name=${enc}&limit=25`).catch(() => []),
+        stelProxy(`products?reference=${enc}&limit=25`).catch(() => []),
+      ]);
+      const seen = new Set();
+      const unique = [...toList(byName), ...toList(byRef)].filter(p => {
+        if (!p || p.deleted || p.inactive) return false;
+        if (seen.has(p.id)) return false;
+        seen.add(p.id); return true;
+      });
+      setResults(unique); setSearched(true);
+    } catch (err) {
+      setSearchError(err.message || "Error buscando en el catálogo de Stel Order.");
+    } finally { setSearching(false); }
+  };
+
+  const addToCart = (p) => {
+    setCart(prev => {
+      const ex = prev.find(l => l.id === p.id);
+      if (ex) return prev.map(l => l.id === p.id ? { ...l, qty: l.qty + 1 } : l);
+      return [...prev, { id: p.id, name: p.name, reference: p["full-reference"] || p.reference || "", qty: 1 }];
+    });
+  };
+  const changeQty = (id, delta) => setCart(prev => prev.map(l => l.id === id ? { ...l, qty: Math.max(1, l.qty + delta) } : l));
+  const setQtyManual = (id, val) => {
+    const n = parseFloat(String(val).replace(",", "."));
+    setCart(prev => prev.map(l => l.id === id ? { ...l, qty: (isNaN(n) || n <= 0) ? l.qty : n } : l));
+  };
+  const removeLine = (id) => setCart(prev => prev.filter(l => l.id !== id));
+  const inCart = (id) => cart.some(l => l.id === id);
+
+  return (
+    <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
+      <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
+
+        <div className="px-3 py-2 sticky top-0 z-10 flex items-center gap-2" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderBottom:"1px solid rgba(177,9,37,0.2)" }}>
+          <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
+          <span className="text-white font-black text-xs tracking-widest uppercase opacity-80">Material</span>
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full" style={{ color:"#64748b", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>{APP_VERSION}</span>
+          <button onClick={onHome} className="ml-auto text-[10px] font-bold px-2 py-0.5 rounded-full active:scale-95" style={{ color:"#9ca3af", background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>⌂ Inicio</button>
+          <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full" style={{ color:BRAND_RED, background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.25)" }}>{today}</span>
+        </div>
+
+        <div className="flex-1 px-4 pt-4 pb-4 overflow-y-auto" style={{ maxHeight:"calc(100vh - 130px)", overflowY:"auto" }}>
+          <div className="flex flex-col gap-2 pb-2">
+            <div className="pt-0.5 pb-0.5">
+              <h2 className="text-white font-black text-base tracking-tight leading-tight">Solicitud de material</h2>
+              <p className="text-slate-500 text-[10px] mt-0">Busca en el catálogo de Stel Order y añade materiales al pedido</p>
+            </div>
+
+            {/* Buscador */}
+            <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+              <label className="text-white font-semibold text-sm">Buscar material</label>
+              <div className="flex gap-2">
+                <input type="text" value={query} onChange={e=>setQuery(e.target.value)}
+                  onKeyDown={e=>{ if (e.key === "Enter") doSearch(); }}
+                  placeholder="Nombre o referencia…"
+                  className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                  style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                <button onClick={doSearch} disabled={searching}
+                  className="px-4 py-2 rounded-lg font-bold text-sm text-white active:scale-95 flex items-center gap-1.5"
+                  style={{ background: searching ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT }}>
+                  {searching ? <Icons.Spin /> : "Buscar"}
+                </button>
+              </div>
+              {searchError && <p className="text-red-400 text-xs font-medium">{searchError}</p>}
+            </div>
+
+            {/* Resultados */}
+            {searched && (
+              <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+                <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(177,9,37,0.12)", borderBottom: "1px solid rgba(177,9,37,0.2)" }}>
+                  <span>🔎</span>
+                  <h3 className="text-white font-bold text-sm">Resultados ({results.length})</h3>
+                </div>
+                {results.length === 0 ? (
+                  <p className="text-slate-500 text-xs px-4 py-4 text-center">
+                    Sin resultados para "{query.trim()}".<br/>Prueba con otra palabra o parte de la referencia.
+                  </p>
+                ) : (
+                  <div>
+                    {results.map(p => (
+                      <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-white text-sm font-semibold leading-tight">{p.name}</p>
+                          <p className="text-slate-500 text-[11px] mt-0.5">
+                            {(p["full-reference"] || p.reference) && <span className="font-bold" style={{ color: BRAND_RED }}>{p["full-reference"] || p.reference}</span>}
+                            {typeof p["real-stock"] === "number" && <span> · Stock: {p["real-stock"]}</span>}
+                          </p>
+                        </div>
+                        <button onClick={()=>addToCart(p)}
+                          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95"
+                          style={inCart(p.id)
+                            ? { background:"rgba(22,163,74,0.15)", border:"1px solid rgba(22,163,74,0.4)", color:"#4ade80" }
+                            : { background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
+                          {inCart(p.id) ? "✓ +1" : "＋ Añadir"}
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Carrito */}
+            <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+              <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(14,116,144,0.12)", borderBottom: "1px solid rgba(14,116,144,0.25)" }}>
+                <span>🛒</span>
+                <h3 className="text-white font-bold text-sm">Materiales del pedido ({cart.length})</h3>
+              </div>
+              {cart.length === 0 ? (
+                <p className="text-slate-500 text-xs px-4 py-4 text-center">Aún no has añadido materiales.<br/>Usa el buscador de arriba.</p>
+              ) : (
+                <div>
+                  {cart.map(l => (
+                    <div key={l.id} className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-white text-sm font-semibold leading-tight">{l.name}</p>
+                        {l.reference && <p className="text-[11px] font-bold mt-0.5" style={{ color: BRAND_RED }}>{l.reference}</p>}
+                      </div>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button onClick={()=>changeQty(l.id,-1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>−</button>
+                        <input type="text" inputMode="decimal" value={l.qty}
+                          onChange={e=>setQtyManual(l.id, e.target.value)}
+                          className="w-12 text-center rounded-lg py-1 text-sm font-bold focus:outline-none"
+                          style={inputStyle} />
+                        <button onClick={()=>changeQty(l.id,1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>＋</button>
+                      </div>
+                      <button onClick={()=>removeLine(l.id)} className="shrink-0 text-red-400 text-xs font-bold px-1.5 active:scale-95">✕</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        <div className="px-3 py-2.5 sticky bottom-0" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderTop:"1px solid rgba(177,9,37,0.15)" }}>
+          <button disabled
+            className="w-full py-3 font-black text-sm rounded-xl text-slate-500 flex items-center justify-center gap-2"
+            style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)" }}>
+            📤 Enviar pedido — disponible en la próxima versión
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── V1.3 · Pantalla de inicio ───────────────────────────────────────────
+function HomeMenu({ onSelect }) {
+  const today = new Date().toLocaleDateString("es-ES", { day:"2-digit", month:"2-digit", year:"numeric" });
+  return (
+    <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
+      <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
+        <div className="flex-1 flex flex-col items-center justify-center px-6 gap-8">
+          <div className="flex flex-col items-center gap-3">
+            <img src={LOGO_SRC} alt="Nimatel" className="h-14 w-auto object-contain" />
+            <div className="text-center">
+              <h1 className="text-white font-black text-xl tracking-tight">App Técnicos</h1>
+              <p className="text-slate-500 text-xs mt-1">{today} · <span className="font-bold" style={{ color: BRAND_RED }}>{APP_VERSION}</span></p>
+            </div>
+          </div>
+          <div className="w-full flex flex-col gap-4">
+            <button onClick={()=>onSelect("checklist")}
+              className="w-full rounded-2xl p-4 flex items-center gap-4 text-left active:scale-95 transition-all"
+              style={{ background:"rgba(177,9,37,0.12)", border:"1px solid rgba(177,9,37,0.35)" }}>
+              <span className="text-3xl">📋</span>
+              <div className="flex-1">
+                <p className="text-white font-black text-base leading-tight">Checklist cierre albaranes</p>
+                <p className="text-slate-400 text-xs mt-0.5">Protocolo de cierre de servicios con PDF y adjunto a Stel Order</p>
+              </div>
+              <span style={{ color: BRAND_RED }}><Icons.ChevR /></span>
+            </button>
+            <button onClick={()=>onSelect("material")}
+              className="w-full rounded-2xl p-4 flex items-center gap-4 text-left active:scale-95 transition-all"
+              style={{ background:"rgba(14,116,144,0.1)", border:"1px solid rgba(14,116,144,0.35)" }}>
+              <span className="text-3xl">🧰</span>
+              <div className="flex-1">
+                <p className="text-white font-black text-base leading-tight">Solicitud de material</p>
+                <p className="text-slate-400 text-xs mt-0.5">Pide material para obras, clientes o acopio desde el catálogo</p>
+              </div>
+              <span className="text-sky-400"><Icons.ChevR /></span>
+            </button>
+          </div>
+        </div>
+        <p className="text-center text-[10px] text-slate-600 pb-4">Nimatel Fibra y Telecomunicaciones</p>
+      </div>
+    </div>
+  );
+}
+
+// ─── V1.3 · App raíz con menú de módulos ─────────────────────────────────
+export default function App() {
+  const [module, setModule] = useState(null); // null | "checklist" | "material"
+  if (module === "checklist") return <ChecklistApp onHome={() => setModule(null)} />;
+  if (module === "material") return <MaterialApp onHome={() => setModule(null)} />;
+  return <HomeMenu onSelect={setModule} />;
 }
