@@ -10,7 +10,7 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.6";
+const APP_VERSION = "V1.7";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
@@ -77,7 +77,7 @@ const getGoogleToken = () => new Promise(async (resolve, reject) => {
 });
 
 // ─── Upload PDF to Google Drive (via Vercel proxy) ───────────────────────
-const uploadToDrive = async (pdfBlob, filename, accessToken) => {
+const uploadToDrive = async (pdfBlob, filename, accessToken, extra = {}) => {
   // Convertir blob a base64 para enviar al proxy
   const arrayBuffer = await pdfBlob.arrayBuffer();
   const bytes = new Uint8Array(arrayBuffer);
@@ -88,7 +88,7 @@ const uploadToDrive = async (pdfBlob, filename, accessToken) => {
   const resp = await fetch("/api/drive-upload", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessToken, filename, pdfBase64 }),
+    body: JSON.stringify({ accessToken, filename, pdfBase64, ...extra }),
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
@@ -511,6 +511,92 @@ async function buildPDF(data) {
     doc.setDrawColor(177,9,37); doc.line(M, H - 10, W - M, H - 10);
   }
 
+  return doc;
+}
+
+// ─── PDF del Pedido de Material (V1.7) ──────────────────────────────────
+async function buildOrderPDF(data) {
+  const JsPDF = await loadJsPDF();
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 14, CW = W - 2 * M;
+  let y = 0;
+
+  const nl = (n = 5) => { y += n; if (y > H - 22) { doc.addPage(); y = 20; } };
+  const line = (x1, y1, x2, y2, color = [230, 230, 230]) => { doc.setDrawColor(...color); doc.line(x1, y1, x2, y2); };
+  const secHeader = (title) => {
+    doc.setFillColor(240, 240, 240);
+    doc.rect(M, y - 4, CW, 7, "F");
+    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(177, 9, 37);
+    doc.text(title.toUpperCase(), M + 2, y + 0.5);
+    y += 5; line(M, y, M + CW, y, [200, 200, 200]); y += 4;
+  };
+  const fRow = (label, val) => {
+    doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+    doc.text(label, M + 2, y);
+    doc.setFont("helvetica", "bold"); doc.setTextColor(30, 30, 30);
+    const lines = doc.splitTextToSize(String(val || "—"), CW - 50);
+    doc.text(lines, M + CW, y, { align: "right" });
+    y += 5.5 * lines.length; line(M, y - 0.5, M + CW, y - 0.5);
+  };
+
+  // Cabecera
+  doc.setFillColor(177, 9, 37);
+  doc.rect(0, 0, W, 38, "F");
+  doc.addImage(LOGO_SRC, "PNG", M, 5, 48, 24);
+  doc.setFontSize(13); doc.setFont("helvetica", "bold"); doc.setTextColor(255, 255, 255);
+  doc.text("PEDIDO DE MATERIAL", W - M, 16, { align: "right" });
+  doc.setFontSize(9); doc.setFont("helvetica", "normal");
+  doc.text(`Ref: ${data.ref}`, W - M, 23, { align: "right" });
+  doc.text(`Fecha: ${data.fecha}`, W - M, 29, { align: "right" });
+  y = 46;
+
+  secHeader("1. Datos del Pedido");
+  fRow("Solicitado por", data.solicitante);
+  fRow("Destino", data.destino);
+  fRow("Cliente", data.clientName);
+  fRow("Título / Obra", data.title);
+  nl(4);
+
+  secHeader("2. Material Solicitado");
+  // Cabecera de tabla
+  doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(80, 80, 80);
+  doc.text("REFERENCIA", M + 2, y);
+  doc.text("MATERIAL", M + 42, y);
+  doc.text("CANTIDAD", M + CW, y, { align: "right" });
+  y += 2; line(M, y, M + CW, y, [180, 180, 180]); y += 4;
+
+  data.lines.forEach((l, idx) => {
+    const nameLines = doc.splitTextToSize(String(l.name || ""), CW - 65);
+    const rowH = Math.max(5.5, 4.2 * nameLines.length + 1.5);
+    if (y + rowH > H - 22) {
+      doc.addPage(); y = 20;
+      doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(80, 80, 80);
+      doc.text("REFERENCIA", M + 2, y);
+      doc.text("MATERIAL", M + 42, y);
+      doc.text("CANTIDAD", M + CW, y, { align: "right" });
+      y += 2; line(M, y, M + CW, y, [180, 180, 180]); y += 4;
+    }
+    doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(177, 9, 37);
+    doc.text(String(l.reference || "—"), M + 2, y);
+    doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+    doc.text(nameLines, M + 42, y);
+    doc.setFont("helvetica", "bold");
+    doc.text(String(l.qty), M + CW, y, { align: "right" });
+    y += rowH; line(M, y - 1.5, M + CW, y - 1.5);
+  });
+
+  nl(6);
+  doc.setFontSize(8.5); doc.setFont("helvetica", "bold"); doc.setTextColor(30, 30, 30);
+  doc.text(`Total: ${data.lines.length} línea${data.lines.length !== 1 ? "s" : ""} de material`, M + 2, y);
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(150, 150, 150);
+    doc.text(`Nimatel Fibra y Telecomunicaciones — Pedido de material ${data.ref}`, M, H - 6);
+    doc.text(`Pág. ${p} / ${totalPages}`, W - M, H - 6, { align: "right" });
+    doc.setDrawColor(177, 9, 37); doc.line(M, H - 10, W - M, H - 10);
+  }
   return doc;
 }
 
@@ -1063,6 +1149,10 @@ function MaterialApp({ onHome }) {
   const [npCreating, setNpCreating] = useState(false);
   const [npError, setNpError] = useState("");
   const [scanTarget, setScanTarget] = useState("search");
+  // PDF a Drive (V1.7)
+  const [pdfStatus, setPdfStatus] = useState("idle"); // idle | loading | success | error
+  const [pdfMsg, setPdfMsg] = useState("");
+  const [pdfViewUrl, setPdfViewUrl] = useState("");
 
   const isAcopio = destino === "Acopio técnico" || destino === "Acopio almacén";
   const toList = (d) => Array.isArray(d) ? d : (d && Array.isArray(d.data) ? d.data : []);
@@ -1228,6 +1318,44 @@ function MaterialApp({ onHome }) {
     setClientSearched(false); setSelectedClient(null); setTitulo(""); setCreateError("");
     setCreatedRef(""); setCreatedTitle("");
     setShowNewProduct(false); setNpName(""); setNpBarcode(""); setNpCreator(""); setNpError("");
+    setPdfStatus("idle"); setPdfMsg(""); setPdfViewUrl("");
+  };
+
+  const orderPdfData = () => ({
+    ref: createdRef,
+    title: createdTitle,
+    solicitante,
+    destino,
+    clientName: isAcopio ? "NIMATEL INSTALACIONES" : (selectedClient ? selectedClient.name : "—"),
+    fecha: new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" }),
+    lines: cart,
+  });
+
+  const saveOrderPDF = async () => {
+    setPdfStatus("loading"); setPdfMsg("Generando PDF…");
+    try {
+      const doc = await buildOrderPDF(orderPdfData());
+      const blob = doc.output("blob");
+      setPdfMsg("Solicitando acceso a Google Drive…");
+      const token = await getGoogleToken();
+      setPdfMsg("Subiendo PDF a Drive…");
+      const up = await uploadToDrive(blob, `${createdRef}.pdf`, token, { folderName: "pedidos de trabajo", makePublic: false });
+      setPdfViewUrl(up.viewUrl || `https://drive.google.com/file/d/${up.fileId}/view`);
+      setPdfStatus("success");
+      setPdfMsg(`✓ ${createdRef}.pdf guardado en la carpeta "pedidos de trabajo"`);
+    } catch (err) {
+      setPdfStatus("error");
+      setPdfMsg(err.message || "Error guardando el PDF en Drive.");
+    }
+  };
+
+  const downloadOrderPDF = async () => {
+    try {
+      const doc = await buildOrderPDF(orderPdfData());
+      doc.save(`${createdRef}.pdf`);
+    } catch (err) {
+      setPdfStatus("error"); setPdfMsg("Error generando el PDF: " + err.message);
+    }
   };
 
   return (
@@ -1521,6 +1649,70 @@ function MaterialApp({ onHome }) {
                   <p className="text-slate-400 text-xs uppercase tracking-widest font-semibold">Referencia</p>
                   <p className="text-2xl font-black tracking-widest mt-0.5" style={{ color: BRAND_RED }}>{createdRef}</p>
                   <p className="text-slate-500 text-xs mt-0.5">{createdTitle}</p>
+                </div>
+              </div>
+
+              <div className="rounded-xl overflow-hidden" style={{ border: "1px solid rgba(14,116,144,0.3)", background: "rgba(14,116,144,0.06)" }}>
+                <div className="px-3 py-2.5 flex items-center gap-2" style={{ borderBottom: "1px solid rgba(14,116,144,0.2)", background: "rgba(14,116,144,0.1)" }}>
+                  <Icons.Drive />
+                  <p className="text-sky-400 font-bold text-sm">PDF del pedido en Drive</p>
+                </div>
+                <div className="p-3 flex flex-col gap-2">
+                  {pdfStatus === "idle" && (
+                    <>
+                      <p className="text-slate-400 text-xs leading-relaxed">
+                        Guarda <span className="text-white font-semibold">{createdRef}.pdf</span> en la carpeta <span className="text-white font-semibold">"pedidos de trabajo"</span> del Drive de Nimatel.
+                      </p>
+                      <button onClick={saveOrderPDF}
+                        className="w-full py-3 font-black text-sm rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2 text-white"
+                        style={{ background: "linear-gradient(135deg,#0ea5e9,#0284c7)", boxShadow: "0 6px 16px rgba(14,116,144,0.3)" }}>
+                        <Icons.Drive />Guardar PDF en Drive
+                      </button>
+                      <button onClick={downloadOrderPDF}
+                        className="w-full py-2 rounded-lg text-xs font-semibold text-slate-400 active:scale-95"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        <span className="inline-flex items-center gap-1.5">📄 Descargar PDF en el móvil</span>
+                      </button>
+                    </>
+                  )}
+                  {pdfStatus === "loading" && (
+                    <div className="flex items-center justify-center gap-2 py-2" style={{ color: "#38bdf8" }}>
+                      <Icons.Spin /><span className="text-sm font-semibold">{pdfMsg}</span>
+                    </div>
+                  )}
+                  {pdfStatus === "success" && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-center gap-2 rounded-lg px-3 py-2.5" style={{ background: "rgba(22,163,74,0.15)", border: "1px solid rgba(22,163,74,0.3)" }}>
+                        <span className="text-green-400 text-lg">✓</span>
+                        <p className="text-green-400 text-xs font-semibold">{pdfMsg}</p>
+                      </div>
+                      {pdfViewUrl && (
+                        <a href={pdfViewUrl} target="_blank" rel="noopener noreferrer"
+                          className="flex items-center justify-center gap-2 py-2 rounded-lg text-xs font-semibold"
+                          style={{ background: "rgba(14,116,144,0.1)", border: "1px solid rgba(14,116,144,0.3)", color: "#38bdf8" }}>
+                          <Icons.Drive />Ver PDF en Google Drive
+                        </a>
+                      )}
+                    </div>
+                  )}
+                  {pdfStatus === "error" && (
+                    <div className="flex flex-col gap-2">
+                      <div className="flex items-start gap-2 rounded-lg px-3 py-2.5" style={{ background: "rgba(177,9,37,0.1)", border: "1px solid rgba(177,9,37,0.3)" }}>
+                        <span className="text-red-400 text-sm mt-0.5 shrink-0">✕</span>
+                        <p className="text-red-400 text-xs font-medium leading-relaxed">{pdfMsg}</p>
+                      </div>
+                      <button onClick={saveOrderPDF}
+                        className="w-full py-2.5 font-bold text-sm rounded-xl active:scale-95 flex items-center justify-center gap-2"
+                        style={{ background: "rgba(177,9,37,0.15)", border: "1px solid rgba(177,9,37,0.3)", color: "#f87171" }}>
+                        Reintentar
+                      </button>
+                      <button onClick={downloadOrderPDF}
+                        className="w-full py-2 rounded-lg text-xs font-semibold text-slate-400 active:scale-95"
+                        style={{ background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)" }}>
+                        📄 Descargar PDF en el móvil
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
 
