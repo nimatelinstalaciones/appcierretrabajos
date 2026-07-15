@@ -10,7 +10,7 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.4";
+const APP_VERSION = "V1.5";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
@@ -106,7 +106,7 @@ const stelProxy = async (endpoint, method = "GET", body = null) => {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-    throw new Error(err.error || `Error proxy Stel: ${resp.status}`);
+    throw new Error(err.error || err.message || err["developer-message"] || `Error proxy Stel: ${resp.status}`);
   }
   return await resp.json();
 };
@@ -149,6 +149,18 @@ const attachToStelOrder = async (fileUrl, entityId, entityType, filename) => {
     "entity-type": entityType,
     "name": filename,
   });
+};
+
+// ─── Cliente interno para acopios (V1.5) ────────────────────────────────
+let NIMATEL_CLIENT_ID = null;
+const resolveInternalClient = async () => {
+  if (NIMATEL_CLIENT_ID) return NIMATEL_CLIENT_ID;
+  const data = await stelProxy(`clients?name=${encodeURIComponent("NIMATEL INSTALACIONES")}&limit=10`);
+  const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : []);
+  const found = list.find(c => c && !c.deleted && String(c.name || "").toUpperCase().includes("NIMATEL INSTALACIONES"));
+  if (!found) throw new Error('No se encontró el cliente interno "NIMATEL INSTALACIONES" (CLI01331) en Stel Order.');
+  NIMATEL_CLIENT_ID = found.id;
+  return NIMATEL_CLIENT_ID;
 };
 
 // ─── Icons ───────────────────────────────────────────────────────────────
@@ -995,9 +1007,17 @@ function ChecklistApp({ onHome }) {
 }
 
 
-// ─── V1.3 · Solicitud de Material — Fase 2: buscador de catálogo + carrito ──
+// ─── V1.5 · Solicitud de Material — catálogo, carrito y creación del pedido ──
+const DESTINOS = [
+  { k: "Obra", icon: "🏗️" },
+  { k: "Cliente", icon: "👤" },
+  { k: "Acopio técnico", icon: "🚐" },
+  { k: "Acopio almacén", icon: "🏢" },
+];
+
 function MaterialApp({ onHome }) {
   const today = new Date().toLocaleDateString("es-ES", { day:"2-digit", month:"2-digit", year:"numeric" });
+  const [phase, setPhase] = useState("cart"); // cart | details | done
   const [query, setQuery] = useState("");
   const [results, setResults] = useState([]);
   const [searching, setSearching] = useState(false);
@@ -1006,7 +1026,21 @@ function MaterialApp({ onHome }) {
   const [cart, setCart] = useState([]);
   const [showScanner, setShowScanner] = useState(false);
   const [scanOk, setScanOk] = useState("");
+  // Datos del pedido
+  const [solicitante, setSolicitante] = useState("");
+  const [destino, setDestino] = useState("");
+  const [clientQuery, setClientQuery] = useState("");
+  const [clientResults, setClientResults] = useState([]);
+  const [clientSearching, setClientSearching] = useState(false);
+  const [clientSearched, setClientSearched] = useState(false);
+  const [selectedClient, setSelectedClient] = useState(null);
+  const [titulo, setTitulo] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createError, setCreateError] = useState("");
+  const [createdRef, setCreatedRef] = useState("");
+  const [createdTitle, setCreatedTitle] = useState("");
 
+  const isAcopio = destino === "Acopio técnico" || destino === "Acopio almacén";
   const toList = (d) => Array.isArray(d) ? d : (d && Array.isArray(d.data) ? d.data : []);
 
   const doSearch = async () => {
@@ -1065,6 +1099,69 @@ function MaterialApp({ onHome }) {
   const removeLine = (id) => setCart(prev => prev.filter(l => l.id !== id));
   const inCart = (id) => cart.some(l => l.id === id);
 
+  const searchClients = async () => {
+    const q = clientQuery.trim();
+    if (q.length < 2) { setCreateError("Escribe al menos 2 caracteres para buscar el cliente."); return; }
+    setClientSearching(true); setCreateError(""); setClientSearched(false); setClientResults([]);
+    try {
+      const data = await stelProxy(`clients?name=${encodeURIComponent(q)}&limit=25`);
+      setClientResults(toList(data).filter(c => c && !c.deleted));
+      setClientSearched(true);
+    } catch (err) {
+      setCreateError(err.message || "Error buscando clientes en Stel Order.");
+    } finally { setClientSearching(false); }
+  };
+
+  const chooseDestino = (d) => {
+    setDestino(d); setCreateError("");
+    if (d === "Acopio técnico" || d === "Acopio almacén") {
+      setSelectedClient(null); setTitulo(""); setClientResults([]); setClientSearched(false); setClientQuery("");
+    }
+  };
+
+  const createOrder = async () => {
+    setCreateError("");
+    if (!solicitante) { setCreateError("Selecciona quién solicita el material."); return; }
+    if (!destino) { setCreateError("Selecciona el destino del pedido."); return; }
+    if (!isAcopio && !selectedClient) { setCreateError("Busca y selecciona el cliente."); return; }
+    if (!isAcopio && !titulo.trim()) { setCreateError(destino === "Obra" ? "Indica la obra o trabajo (título del documento)." : "Indica el título del pedido."); return; }
+    if (cart.length === 0) { setCreateError("El pedido no tiene líneas de material."); return; }
+    setCreating(true);
+    try {
+      let clientId, finalTitle;
+      if (isAcopio) {
+        clientId = await resolveInternalClient();
+        finalTitle = destino === "Acopio técnico" ? `Acopio técnico — ${solicitante}` : "Acopio almacén";
+      } else {
+        clientId = selectedClient.id;
+        finalTitle = titulo.trim();
+      }
+      const body = {
+        "account-id": clientId,
+        "title": finalTitle,
+        "comments": `Solicitado por: ${solicitante}\nDestino: ${destino}\nGenerado desde Nimatel App ${APP_VERSION}`,
+        "lines": cart.map(l => ({ "line-type": "ITEM", "item-id": l.id, "units": l.qty })),
+      };
+      const resp = await stelProxy("workOrders", "POST", body);
+      const created = Array.isArray(resp) ? resp[0] : resp;
+      if (!created || (!created.id && !created["full-reference"])) {
+        throw new Error("Stel Order no devolvió el pedido creado: " + JSON.stringify(created).substring(0, 200));
+      }
+      setCreatedRef(created["full-reference"] || created.reference || `ID ${created.id}`);
+      setCreatedTitle(finalTitle);
+      setPhase("done");
+    } catch (err) {
+      setCreateError(err.message || "Error creando el pedido en Stel Order.");
+    } finally { setCreating(false); }
+  };
+
+  const resetOrder = () => {
+    setPhase("cart"); setQuery(""); setResults([]); setSearched(false); setSearchError(""); setScanOk("");
+    setCart([]); setSolicitante(""); setDestino(""); setClientQuery(""); setClientResults([]);
+    setClientSearched(false); setSelectedClient(null); setTitulo(""); setCreateError("");
+    setCreatedRef(""); setCreatedTitle("");
+  };
+
   return (
     <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
       <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
@@ -1079,111 +1176,313 @@ function MaterialApp({ onHome }) {
         </div>
 
         <div className="flex-1 px-4 pt-4 pb-4 overflow-y-auto" style={{ maxHeight:"calc(100vh - 130px)", overflowY:"auto" }}>
-          <div className="flex flex-col gap-2 pb-2">
-            <div className="pt-0.5 pb-0.5">
-              <h2 className="text-white font-black text-base tracking-tight leading-tight">Solicitud de material</h2>
-              <p className="text-slate-500 text-[10px] mt-0">Busca en el catálogo de Stel Order y añade materiales al pedido</p>
-            </div>
 
-            {/* Buscador */}
-            <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
-              <label className="text-white font-semibold text-sm">Buscar material</label>
-              <div className="flex gap-2">
-                <input type="text" value={query} onChange={e=>setQuery(e.target.value)}
-                  onKeyDown={e=>{ if (e.key === "Enter") doSearch(); }}
-                  placeholder="Nombre o referencia…"
-                  className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
-                  style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
-                <button onClick={()=>setShowScanner(true)} title="Escanear código de barras"
-                  className="px-3 py-2 rounded-lg active:scale-95"
-                  style={{ background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
-                  <Icons.Camera />
-                </button>
-                <button onClick={doSearch} disabled={searching}
-                  className="px-4 py-2 rounded-lg font-bold text-sm text-white active:scale-95 flex items-center gap-1.5"
-                  style={{ background: searching ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT }}>
-                  {searching ? <Icons.Spin /> : "Buscar"}
-                </button>
+          {/* ══ FASE CARRITO ══ */}
+          {phase === "cart" && (
+            <div className="flex flex-col gap-2 pb-2">
+              <div className="pt-0.5 pb-0.5">
+                <h2 className="text-white font-black text-base tracking-tight leading-tight">Solicitud de material</h2>
+                <p className="text-slate-500 text-[10px] mt-0">Busca en el catálogo de Stel Order y añade materiales al pedido</p>
               </div>
-              {searchError && <p className="text-red-400 text-xs font-medium">{searchError}</p>}
-              {scanOk && <p className="text-green-400 text-xs font-semibold">{scanOk}</p>}
-            </div>
 
-            {/* Resultados */}
-            {searched && (
-              <div className="rounded-2xl overflow-hidden" style={cardStyle}>
-                <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(177,9,37,0.12)", borderBottom: "1px solid rgba(177,9,37,0.2)" }}>
-                  <span>🔎</span>
-                  <h3 className="text-white font-bold text-sm">Resultados ({results.length})</h3>
+              <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                <label className="text-white font-semibold text-sm">Buscar material</label>
+                <div className="flex gap-2">
+                  <input type="text" value={query} onChange={e=>setQuery(e.target.value)}
+                    onKeyDown={e=>{ if (e.key === "Enter") doSearch(); }}
+                    placeholder="Nombre o referencia…"
+                    className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                    style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                  <button onClick={()=>setShowScanner(true)} title="Escanear código de barras"
+                    className="px-3 py-2 rounded-lg active:scale-95"
+                    style={{ background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
+                    <Icons.Camera />
+                  </button>
+                  <button onClick={doSearch} disabled={searching}
+                    className="px-4 py-2 rounded-lg font-bold text-sm text-white active:scale-95 flex items-center gap-1.5"
+                    style={{ background: searching ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT }}>
+                    {searching ? <Icons.Spin /> : "Buscar"}
+                  </button>
                 </div>
-                {results.length === 0 ? (
-                  <p className="text-slate-500 text-xs px-4 py-4 text-center">
-                    Sin resultados para "{query.trim()}".<br/>Prueba con otra palabra o parte de la referencia.
-                  </p>
+                {searchError && <p className="text-red-400 text-xs font-medium">{searchError}</p>}
+                {scanOk && <p className="text-green-400 text-xs font-semibold">{scanOk}</p>}
+              </div>
+
+              {searched && (
+                <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+                  <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(177,9,37,0.12)", borderBottom: "1px solid rgba(177,9,37,0.2)" }}>
+                    <span>🔎</span>
+                    <h3 className="text-white font-bold text-sm">Resultados ({results.length})</h3>
+                  </div>
+                  {results.length === 0 ? (
+                    <p className="text-slate-500 text-xs px-4 py-4 text-center">
+                      Sin resultados para "{query.trim()}".<br/>Prueba con otra palabra o parte de la referencia.
+                    </p>
+                  ) : (
+                    <div>
+                      {results.map(p => (
+                        <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-white text-sm font-semibold leading-tight">{p.name}</p>
+                            <p className="text-slate-500 text-[11px] mt-0.5">
+                              {(p["full-reference"] || p.reference) && <span className="font-bold" style={{ color: BRAND_RED }}>{p["full-reference"] || p.reference}</span>}
+                              {typeof p["real-stock"] === "number" && <span> · Stock: {p["real-stock"]}</span>}
+                            </p>
+                          </div>
+                          <button onClick={()=>addToCart(p)}
+                            className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95"
+                            style={inCart(p.id)
+                              ? { background:"rgba(22,163,74,0.15)", border:"1px solid rgba(22,163,74,0.4)", color:"#4ade80" }
+                              : { background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
+                            {inCart(p.id) ? "✓ +1" : "＋ Añadir"}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+                <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(14,116,144,0.12)", borderBottom: "1px solid rgba(14,116,144,0.25)" }}>
+                  <span>🛒</span>
+                  <h3 className="text-white font-bold text-sm">Materiales del pedido ({cart.length})</h3>
+                </div>
+                {cart.length === 0 ? (
+                  <p className="text-slate-500 text-xs px-4 py-4 text-center">Aún no has añadido materiales.<br/>Usa el buscador o el escáner de arriba.</p>
                 ) : (
                   <div>
-                    {results.map(p => (
-                      <div key={p.id} className="flex items-center gap-3 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                    {cart.map(l => (
+                      <div key={l.id} className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
                         <div className="flex-1 min-w-0">
-                          <p className="text-white text-sm font-semibold leading-tight">{p.name}</p>
-                          <p className="text-slate-500 text-[11px] mt-0.5">
-                            {(p["full-reference"] || p.reference) && <span className="font-bold" style={{ color: BRAND_RED }}>{p["full-reference"] || p.reference}</span>}
-                            {typeof p["real-stock"] === "number" && <span> · Stock: {p["real-stock"]}</span>}
-                          </p>
+                          <p className="text-white text-sm font-semibold leading-tight">{l.name}</p>
+                          {l.reference && <p className="text-[11px] font-bold mt-0.5" style={{ color: BRAND_RED }}>{l.reference}</p>}
                         </div>
-                        <button onClick={()=>addToCart(p)}
-                          className="shrink-0 px-3 py-1.5 rounded-lg text-xs font-bold active:scale-95"
-                          style={inCart(p.id)
-                            ? { background:"rgba(22,163,74,0.15)", border:"1px solid rgba(22,163,74,0.4)", color:"#4ade80" }
-                            : { background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
-                          {inCart(p.id) ? "✓ +1" : "＋ Añadir"}
-                        </button>
+                        <div className="flex items-center gap-1 shrink-0">
+                          <button onClick={()=>changeQty(l.id,-1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>−</button>
+                          <input type="text" inputMode="decimal" value={l.qty}
+                            onChange={e=>setQtyManual(l.id, e.target.value)}
+                            className="w-12 text-center rounded-lg py-1 text-sm font-bold focus:outline-none"
+                            style={inputStyle} />
+                          <button onClick={()=>changeQty(l.id,1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>＋</button>
+                        </div>
+                        <button onClick={()=>removeLine(l.id)} className="shrink-0 text-red-400 text-xs font-bold px-1.5 active:scale-95">✕</button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-            )}
+            </div>
+          )}
 
-            {/* Carrito */}
-            <div className="rounded-2xl overflow-hidden" style={cardStyle}>
-              <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(14,116,144,0.12)", borderBottom: "1px solid rgba(14,116,144,0.25)" }}>
-                <span>🛒</span>
-                <h3 className="text-white font-bold text-sm">Materiales del pedido ({cart.length})</h3>
+          {/* ══ FASE DATOS DEL PEDIDO ══ */}
+          {phase === "details" && (
+            <div className="flex flex-col gap-2 pb-2">
+              <div className="pt-0.5 pb-0.5">
+                <h2 className="text-white font-black text-base tracking-tight leading-tight">Datos del pedido</h2>
+                <p className="text-slate-500 text-[10px] mt-0">{cart.length} línea{cart.length !== 1 ? "s" : ""} de material · Se creará un Pedido de trabajo en Stel Order</p>
               </div>
-              {cart.length === 0 ? (
-                <p className="text-slate-500 text-xs px-4 py-4 text-center">Aún no has añadido materiales.<br/>Usa el buscador de arriba.</p>
-              ) : (
-                <div>
-                  {cart.map(l => (
-                    <div key={l.id} className="flex items-center gap-2 px-3 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-white text-sm font-semibold leading-tight">{l.name}</p>
-                        {l.reference && <p className="text-[11px] font-bold mt-0.5" style={{ color: BRAND_RED }}>{l.reference}</p>}
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <button onClick={()=>changeQty(l.id,-1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>−</button>
-                        <input type="text" inputMode="decimal" value={l.qty}
-                          onChange={e=>setQtyManual(l.id, e.target.value)}
-                          className="w-12 text-center rounded-lg py-1 text-sm font-bold focus:outline-none"
-                          style={inputStyle} />
-                        <button onClick={()=>changeQty(l.id,1)} className="w-7 h-7 rounded-lg font-black text-slate-300 active:scale-95" style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>＋</button>
-                      </div>
-                      <button onClick={()=>removeLine(l.id)} className="shrink-0 text-red-400 text-xs font-bold px-1.5 active:scale-95">✕</button>
-                    </div>
+
+              <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                <label className="text-white font-semibold text-sm flex items-center gap-2">
+                  Solicitado por <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                </label>
+                <select value={solicitante} onChange={e=>{ setSolicitante(e.target.value); setCreateError(""); }}
+                  className="w-full rounded-lg px-2.5 py-2 text-sm appearance-none focus:outline-none"
+                  style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"}>
+                  <option value="" style={{background:"#0a0a0a"}}>— Seleccionar —</option>
+                  {SOLICITANTES.map(t=><option key={t} style={{background:"#0a0a0a"}}>{t}</option>)}
+                </select>
+              </div>
+
+              <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                <label className="text-white font-semibold text-sm flex items-center gap-2">
+                  Destino <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                </label>
+                <div className="grid grid-cols-2 gap-2">
+                  {DESTINOS.map(d=>(
+                    <button key={d.k} onClick={()=>chooseDestino(d.k)}
+                      className="py-2 rounded-xl font-bold text-xs tracking-wide active:scale-95 flex flex-col items-center gap-1"
+                      style={destino===d.k ? {background:"rgba(177,9,37,0.2)",border:"2px solid #b10925",color:"#f87171"} : {background:"rgba(255,255,255,0.03)",border:"1px solid rgba(255,255,255,0.08)",color:"#6b7280"}}>
+                      <span className="text-base">{d.icon}</span>{d.k}
+                    </button>
                   ))}
+                </div>
+              </div>
+
+              {destino && !isAcopio && (
+                <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                  <label className="text-white font-semibold text-sm flex items-center gap-2">
+                    Cliente <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                  </label>
+                  {selectedClient ? (
+                    <div className="flex items-center gap-2 rounded-lg px-3 py-2.5" style={{ background:"rgba(22,163,74,0.1)", border:"1px solid rgba(22,163,74,0.3)" }}>
+                      <span className="text-green-400">✓</span>
+                      <p className="flex-1 text-white text-sm font-semibold leading-tight">{selectedClient.name}</p>
+                      <button onClick={()=>{ setSelectedClient(null); setClientSearched(false); setClientResults([]); }}
+                        className="text-slate-400 text-xs font-bold active:scale-95">Cambiar</button>
+                    </div>
+                  ) : (
+                    <>
+                      <div className="flex gap-2">
+                        <input type="text" value={clientQuery} onChange={e=>setClientQuery(e.target.value)}
+                          onKeyDown={e=>{ if (e.key === "Enter") searchClients(); }}
+                          placeholder="Nombre del cliente…"
+                          className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                          style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                        <button onClick={searchClients} disabled={clientSearching}
+                          className="px-4 py-2 rounded-lg font-bold text-sm text-white active:scale-95 flex items-center gap-1.5"
+                          style={{ background: clientSearching ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT }}>
+                          {clientSearching ? <Icons.Spin /> : "Buscar"}
+                        </button>
+                      </div>
+                      {clientSearched && (
+                        clientResults.length === 0 ? (
+                          <p className="text-slate-500 text-xs text-center py-2">Sin resultados para "{clientQuery.trim()}".</p>
+                        ) : (
+                          <div className="rounded-lg overflow-hidden" style={{ border:"1px solid rgba(255,255,255,0.08)" }}>
+                            {clientResults.map(c=>(
+                              <button key={c.id} onClick={()=>{ setSelectedClient(c); setCreateError(""); }}
+                                className="w-full text-left px-3 py-2.5 border-b active:scale-[0.99]"
+                                style={{ borderColor:"rgba(255,255,255,0.05)", background:"rgba(255,255,255,0.02)" }}>
+                                <p className="text-white text-sm font-semibold leading-tight">{c.name}</p>
+                              </button>
+                            ))}
+                          </div>
+                        )
+                      )}
+                    </>
+                  )}
+                  <label className="text-white font-semibold text-sm flex items-center gap-2 mt-1">
+                    {destino === "Obra" ? "Obra / trabajo (título)" : "Título del pedido"}
+                    <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                  </label>
+                  <input type="text" value={titulo} onChange={e=>{ setTitulo(e.target.value); setCreateError(""); }}
+                    placeholder={destino === "Obra" ? "Ej: Obra Edificio Marqués 12 — Fase 2" : "Ej: Ampliación red oficina"}
+                    className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                    style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                </div>
+              )}
+
+              {isAcopio && (
+                <div className="rounded-xl p-2.5 flex flex-col gap-1.5" style={cardStyle}>
+                  <p className="text-slate-400 text-xs">Cliente del pedido</p>
+                  <p className="text-white text-sm font-bold">NIMATEL INSTALACIONES <span className="text-slate-500 font-normal">(CLI01331)</span></p>
+                  <p className="text-slate-400 text-xs mt-1">Título automático</p>
+                  <p className="text-sm font-bold" style={{ color: BRAND_RED }}>
+                    {destino === "Acopio técnico" ? `Acopio técnico — ${solicitante || "…"}` : "Acopio almacén"}
+                  </p>
+                </div>
+              )}
+
+              <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+                <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(14,116,144,0.12)", borderBottom: "1px solid rgba(14,116,144,0.25)" }}>
+                  <span>🛒</span>
+                  <h3 className="text-white font-bold text-sm">Resumen del material</h3>
+                </div>
+                {cart.map(l => (
+                  <div key={l.id} className="flex items-center justify-between gap-3 px-4 py-2 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                    <p className="text-slate-300 text-xs leading-relaxed flex-1">{l.name}</p>
+                    <span className="text-white text-xs font-bold shrink-0">× {l.qty}</span>
+                  </div>
+                ))}
+              </div>
+
+              {createError && (
+                <div className="flex items-center gap-2 rounded-xl px-3 py-2.5 text-sm font-medium"
+                  style={{ background: "rgba(177,9,37,0.1)", border: "1px solid rgba(177,9,37,0.4)", color: "#f87171" }}>
+                  <Icons.Alert /><span>{createError}</span>
                 </div>
               )}
             </div>
-          </div>
+          )}
+
+          {/* ══ FASE CONFIRMACIÓN ══ */}
+          {phase === "done" && (
+            <div className="flex flex-col gap-4 pb-8">
+              <div className="rounded-xl p-4 text-center" style={{ background: "linear-gradient(135deg,rgba(22,163,74,0.15),rgba(22,163,74,0.05))", border: "1px solid rgba(22,163,74,0.35)" }}>
+                <div className="text-4xl mb-2">✅</div>
+                <h2 className="text-white text-xl font-black tracking-tight">Pedido creado</h2>
+                <p className="text-slate-400 text-xs mt-1">Registrado en Stel Order como Pedido de trabajo</p>
+                <div className="mt-3 inline-flex flex-col items-center rounded-2xl px-5 py-2.5" style={{ background: "rgba(177,9,37,0.15)", border: "1px solid rgba(177,9,37,0.4)" }}>
+                  <p className="text-slate-400 text-xs uppercase tracking-widest font-semibold">Referencia</p>
+                  <p className="text-2xl font-black tracking-widest mt-0.5" style={{ color: BRAND_RED }}>{createdRef}</p>
+                  <p className="text-slate-500 text-xs mt-0.5">{createdTitle}</p>
+                </div>
+              </div>
+
+              <div className="rounded-2xl overflow-hidden" style={cardStyle}>
+                <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(177,9,37,0.12)", borderBottom: "1px solid rgba(177,9,37,0.2)" }}>
+                  <span>📋</span><h3 className="text-white font-bold text-sm">Detalle</h3>
+                </div>
+                <div className="flex items-start justify-between gap-3 px-4 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                  <span className="text-slate-400 text-xs">Solicitado por</span>
+                  <span className="text-white text-sm font-semibold text-right">{solicitante}</span>
+                </div>
+                <div className="flex items-start justify-between gap-3 px-4 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                  <span className="text-slate-400 text-xs">Destino</span>
+                  <span className="text-white text-sm font-semibold text-right">{destino}</span>
+                </div>
+                {!isAcopio && selectedClient && (
+                  <div className="flex items-start justify-between gap-3 px-4 py-2.5 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                    <span className="text-slate-400 text-xs">Cliente</span>
+                    <span className="text-white text-sm font-semibold text-right">{selectedClient.name}</span>
+                  </div>
+                )}
+                {cart.map(l => (
+                  <div key={l.id} className="flex items-center justify-between gap-3 px-4 py-2 border-b" style={{ borderColor: "rgba(255,255,255,0.05)" }}>
+                    <p className="text-slate-300 text-xs leading-relaxed flex-1">{l.name}</p>
+                    <span className="text-white text-xs font-bold shrink-0">× {l.qty}</span>
+                  </div>
+                ))}
+              </div>
+
+              <p className="text-slate-500 text-xs text-center leading-relaxed">
+                Pedro Eloy lo verá en Stel Order en estado <span className="text-white font-semibold">Pendiente tramitar</span>.
+              </p>
+            </div>
+          )}
         </div>
 
         <div className="px-3 py-2.5 sticky bottom-0" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderTop:"1px solid rgba(177,9,37,0.15)" }}>
-          <button disabled
-            className="w-full py-3 font-black text-sm rounded-xl text-slate-500 flex items-center justify-center gap-2"
-            style={{ background:"rgba(255,255,255,0.04)", border:"1px solid rgba(255,255,255,0.08)" }}>
-            📤 Enviar pedido — disponible en la próxima versión
-          </button>
+          {phase === "cart" && (
+            <button onClick={()=>{ if (cart.length > 0) { setCreateError(""); setPhase("details"); } }}
+              disabled={cart.length === 0}
+              className="w-full py-3 font-black text-sm rounded-xl active:scale-95 transition-all flex items-center justify-center gap-2"
+              style={cart.length > 0
+                ? { background: BRAND_GRADIENT, color: "white", boxShadow: "0 8px 20px rgba(177,9,37,0.3)" }
+                : { background: "rgba(255,255,255,0.04)", border: "1px solid rgba(255,255,255,0.08)", color: "#64748b" }}>
+              {cart.length > 0 ? <>Continuar ({cart.length} línea{cart.length !== 1 ? "s" : ""})<Icons.ChevR /></> : "Añade materiales para continuar"}
+            </button>
+          )}
+          {phase === "details" && (
+            <div className="flex gap-2">
+              <button onClick={()=>{ setCreateError(""); setPhase("cart"); }} disabled={creating}
+                className="flex items-center gap-1.5 px-4 py-3 font-bold text-sm rounded-xl active:scale-95 text-slate-300"
+                style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>
+                <Icons.ChevL />Atrás
+              </button>
+              <button onClick={createOrder} disabled={creating}
+                className="flex-1 flex items-center justify-center gap-2 py-3 font-black text-sm rounded-xl active:scale-95 text-white"
+                style={{ background: creating ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT, boxShadow:"0 8px 20px rgba(177,9,37,0.3)" }}>
+                {creating ? <><Icons.Spin />Creando pedido…</> : <>📤 Crear pedido en Stel Order</>}
+              </button>
+            </div>
+          )}
+          {phase === "done" && (
+            <div className="flex gap-2">
+              <button onClick={onHome}
+                className="px-4 py-3 font-bold text-sm rounded-xl active:scale-95 text-slate-300"
+                style={{ background:"rgba(255,255,255,0.05)", border:"1px solid rgba(255,255,255,0.1)" }}>
+                ⌂ Inicio
+              </button>
+              <button onClick={resetOrder}
+                className="flex-1 py-3 font-black text-sm rounded-xl active:scale-95 text-white"
+                style={{ background: BRAND_GRADIENT, boxShadow:"0 8px 20px rgba(177,9,37,0.3)" }}>
+                ＋ Nuevo pedido de material
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>
