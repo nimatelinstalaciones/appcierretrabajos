@@ -29,8 +29,9 @@ export default async function handler(req, res) {
       method,
       headers: {
         "APIKEY": STEL_API_KEY,
-        "Content-Type": "application/json",
+        "Content-Type": "application/json; charset=UTF-8",
         "Accept": "application/json",
+        "Accept-Charset": "UTF-8",
       },
     };
     if (reqBody && method !== "GET") {
