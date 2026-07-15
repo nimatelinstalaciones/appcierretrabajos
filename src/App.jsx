@@ -10,7 +10,7 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.7";
+const APP_VERSION = "V1.8";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
@@ -53,8 +53,35 @@ const loadGoogleAPI = () => new Promise((resolve) => {
   document.head.appendChild(s);
 });
 
+// V1.8 — token de Google cacheado (memoria + localStorage) para no autenticar cada vez
+let GOOGLE_TOKEN_CACHE = null; // { token, expiresAt }
+const GOOGLE_TOKEN_KEY = "nimatel_gtoken";
+
+const readStoredGoogleToken = () => {
+  try {
+    const stored = JSON.parse(localStorage.getItem(GOOGLE_TOKEN_KEY) || "null");
+    if (stored && stored.token && stored.expiresAt > Date.now() + 60000) return stored;
+  } catch (_) {}
+  return null;
+};
+
+const hasValidGoogleToken = () => {
+  if (GOOGLE_TOKEN_CACHE && GOOGLE_TOKEN_CACHE.expiresAt > Date.now() + 60000) return true;
+  return readStoredGoogleToken() !== null;
+};
+
+const clearGoogleToken = () => {
+  GOOGLE_TOKEN_CACHE = null;
+  try { localStorage.removeItem(GOOGLE_TOKEN_KEY); } catch (_) {}
+};
+
 const getGoogleToken = () => new Promise(async (resolve, reject) => {
   try {
+    if (GOOGLE_TOKEN_CACHE && GOOGLE_TOKEN_CACHE.expiresAt > Date.now() + 60000) {
+      resolve(GOOGLE_TOKEN_CACHE.token); return;
+    }
+    const stored = readStoredGoogleToken();
+    if (stored) { GOOGLE_TOKEN_CACHE = stored; resolve(stored.token); return; }
     await loadGoogleAPI();
     const client = window.google.accounts.oauth2.initTokenClient({
       client_id: GOOGLE_CLIENT_ID,
@@ -63,6 +90,9 @@ const getGoogleToken = () => new Promise(async (resolve, reject) => {
         if (resp.error) {
           reject(new Error(`Error de autenticación Google: ${resp.error} — ${resp.error_description || ""}`));
         } else {
+          const expiresAt = Date.now() + (parseInt(resp.expires_in || "3600", 10) - 120) * 1000;
+          GOOGLE_TOKEN_CACHE = { token: resp.access_token, expiresAt };
+          try { localStorage.setItem(GOOGLE_TOKEN_KEY, JSON.stringify(GOOGLE_TOKEN_CACHE)); } catch (_) {}
           resolve(resp.access_token);
         }
       },
@@ -70,7 +100,7 @@ const getGoogleToken = () => new Promise(async (resolve, reject) => {
         reject(new Error(`Error OAuth: ${err.type || JSON.stringify(err)}`));
       },
     });
-    client.requestAccessToken({ prompt: "consent" });
+    client.requestAccessToken({ prompt: "" });
   } catch (err) {
     reject(new Error(`Error cargando Google API: ${err.message}`));
   }
@@ -92,7 +122,12 @@ const uploadToDrive = async (pdfBlob, filename, accessToken, extra = {}) => {
   });
   if (!resp.ok) {
     const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-    throw new Error(err.error || `Error proxy Drive: ${resp.status}`);
+    const msg = String(err.error || `Error proxy Drive: ${resp.status}`);
+    if (msg.includes("401") || msg.toLowerCase().includes("invalid credentials") || msg.toLowerCase().includes("unauthorized")) {
+      clearGoogleToken();
+      throw new Error("La sesión de Google ha caducado. Vuelve a pulsarlo para autenticarte de nuevo.");
+    }
+    throw new Error(msg);
   }
   return await resp.json(); // { fileId, publicUrl, folderId }
 };
@@ -641,6 +676,16 @@ const cleanUrl = `${window.location.origin}/api/file/${encodeURIComponent(filena
       setStatusMsg(err.message || "Error desconocido");
     }
   };
+
+  // V1.8 — si ya hay sesión de Google válida, adjuntar automáticamente al abrir el reporte
+  const autoTried = useRef(false);
+  useEffect(() => {
+    if (!autoTried.current && albaranRef && hasValidGoogleToken()) {
+      autoTried.current = true;
+      handleAutoAttach();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (!albaranRef) return null;
 
