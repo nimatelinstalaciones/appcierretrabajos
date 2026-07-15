@@ -10,7 +10,7 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.5";
+const APP_VERSION = "V1.6";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
@@ -161,6 +161,22 @@ const resolveInternalClient = async () => {
   if (!found) throw new Error('No se encontró el cliente interno "NIMATEL INSTALACIONES" (CLI01331) en Stel Order.');
   NIMATEL_CLIENT_ID = found.id;
   return NIMATEL_CLIENT_ID;
+};
+
+// ─── Empleado "Administración" para el creador de documentos (V1.6) ─────
+let ADMIN_EMPLOYEE_ID = null;
+let ADMIN_EMPLOYEE_SEARCHED = false;
+const resolveAdminEmployee = async () => {
+  if (ADMIN_EMPLOYEE_SEARCHED) return ADMIN_EMPLOYEE_ID;
+  ADMIN_EMPLOYEE_SEARCHED = true;
+  try {
+    const data = await stelProxy("employees?limit=100");
+    const list = Array.isArray(data) ? data : (data && Array.isArray(data.data) ? data.data : []);
+    const norm = (s) => String(s || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase();
+    const found = list.find(e => e && !e.deleted && norm(e.name).includes("ADMINISTRA"));
+    ADMIN_EMPLOYEE_ID = found ? found.id : null;
+  } catch (_) { ADMIN_EMPLOYEE_ID = null; }
+  return ADMIN_EMPLOYEE_ID;
 };
 
 // ─── Icons ───────────────────────────────────────────────────────────────
@@ -1039,6 +1055,14 @@ function MaterialApp({ onHome }) {
   const [createError, setCreateError] = useState("");
   const [createdRef, setCreatedRef] = useState("");
   const [createdTitle, setCreatedTitle] = useState("");
+  // Producto nuevo (V1.6)
+  const [showNewProduct, setShowNewProduct] = useState(false);
+  const [npName, setNpName] = useState("");
+  const [npBarcode, setNpBarcode] = useState("");
+  const [npCreator, setNpCreator] = useState("");
+  const [npCreating, setNpCreating] = useState(false);
+  const [npError, setNpError] = useState("");
+  const [scanTarget, setScanTarget] = useState("search");
 
   const isAcopio = destino === "Acopio técnico" || destino === "Acopio almacén";
   const toList = (d) => Array.isArray(d) ? d : (d && Array.isArray(d.data) ? d.data : []);
@@ -1099,6 +1123,41 @@ function MaterialApp({ onHome }) {
   const removeLine = (id) => setCart(prev => prev.filter(l => l.id !== id));
   const inCart = (id) => cart.some(l => l.id === id);
 
+  const createNewProduct = async () => {
+    setNpError("");
+    if (!npName.trim()) { setNpError("El nombre del producto es obligatorio."); return; }
+    if (!npCreator) { setNpError("Selecciona quién crea el producto."); return; }
+    setNpCreating(true);
+    try {
+      let next = 1;
+      try {
+        const data = await stelProxy(`products?reference=${encodeURIComponent("NUEVO")}&limit=100`);
+        toList(data).forEach(p => {
+          const m = String(p.reference || p["full-reference"] || "").match(/NUEVO-?(\d+)/i);
+          if (m) next = Math.max(next, parseInt(m[1], 10) + 1);
+        });
+      } catch (_) {}
+      const ref = "NUEVO-" + String(next).padStart(3, "0");
+      const fecha = new Date().toLocaleDateString("es-ES");
+      const body = {
+        "serial-number-id": -2,
+        "reference": ref,
+        "name": npName.trim(),
+        "description": "PRODUCTO PENDIENTE DE REVISAR POR COMPRAS",
+        "private-comments": `Creado desde Nimatel App ${APP_VERSION} por ${npCreator} el ${fecha}. Pendiente de completar precio, proveedor y categoría.`,
+      };
+      if (npBarcode.trim()) body["barcode"] = npBarcode.trim();
+      const resp = await stelProxy("products", "POST", body);
+      const created = Array.isArray(resp) ? resp[0] : resp;
+      if (!created || !created.id) throw new Error("Stel Order no devolvió el producto creado: " + JSON.stringify(created).substring(0, 200));
+      addToCart({ id: created.id, name: created.name || npName.trim(), "full-reference": created["full-reference"] || created.reference || ref });
+      setScanOk(`✓ Producto ${created.reference || ref} creado y añadido al pedido.`);
+      setShowNewProduct(false); setNpName(""); setNpBarcode(""); setNpCreator("");
+    } catch (err) {
+      setNpError(err.message || "Error creando el producto en Stel Order.");
+    } finally { setNpCreating(false); }
+  };
+
   const searchClients = async () => {
     const q = clientQuery.trim();
     if (q.length < 2) { setCreateError("Escribe al menos 2 caracteres para buscar el cliente."); return; }
@@ -1142,7 +1201,15 @@ function MaterialApp({ onHome }) {
         "comments": `Solicitado por: ${solicitante}\nDestino: ${destino}\nGenerado desde Nimatel App ${APP_VERSION}`,
         "lines": cart.map(l => ({ "line-type": "ITEM", "item-id": l.id, "units": l.qty })),
       };
-      const resp = await stelProxy("workOrders", "POST", body);
+      const creatorId = await resolveAdminEmployee();
+      if (creatorId) body["creator-id"] = creatorId;
+      let resp;
+      try {
+        resp = await stelProxy("workOrders", "POST", body);
+      } catch (e1) {
+        if (body["creator-id"]) { delete body["creator-id"]; resp = await stelProxy("workOrders", "POST", body); }
+        else throw e1;
+      }
       const created = Array.isArray(resp) ? resp[0] : resp;
       if (!created || (!created.id && !created["full-reference"])) {
         throw new Error("Stel Order no devolvió el pedido creado: " + JSON.stringify(created).substring(0, 200));
@@ -1160,12 +1227,13 @@ function MaterialApp({ onHome }) {
     setCart([]); setSolicitante(""); setDestino(""); setClientQuery(""); setClientResults([]);
     setClientSearched(false); setSelectedClient(null); setTitulo(""); setCreateError("");
     setCreatedRef(""); setCreatedTitle("");
+    setShowNewProduct(false); setNpName(""); setNpBarcode(""); setNpCreator(""); setNpError("");
   };
 
   return (
     <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
       <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
-        {showScanner && <BarcodeScanner onDetect={handleBarcode} onClose={()=>setShowScanner(false)} />}
+        {showScanner && <BarcodeScanner onDetect={(code)=>{ if (scanTarget === "newprod") { setNpBarcode(code); setShowScanner(false); } else { handleBarcode(code); } }} onClose={()=>setShowScanner(false)} />}
 
         <div className="px-3 py-2 sticky top-0 z-10 flex items-center gap-2" style={{ background:"rgba(15,10,11,0.97)", backdropFilter:"blur(12px)", borderBottom:"1px solid rgba(177,9,37,0.2)" }}>
           <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
@@ -1193,7 +1261,7 @@ function MaterialApp({ onHome }) {
                     placeholder="Nombre o referencia…"
                     className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
                     style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
-                  <button onClick={()=>setShowScanner(true)} title="Escanear código de barras"
+                  <button onClick={()=>{ setScanTarget("search"); setShowScanner(true); }} title="Escanear código de barras"
                     className="px-3 py-2 rounded-lg active:scale-95"
                     style={{ background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
                     <Icons.Camera />
@@ -1242,6 +1310,51 @@ function MaterialApp({ onHome }) {
                   )}
                 </div>
               )}
+
+              <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                {!showNewProduct ? (
+                  <button onClick={()=>{ setShowNewProduct(true); setNpError(""); }}
+                    className="w-full py-2.5 rounded-xl font-bold text-xs active:scale-95"
+                    style={{ background:"rgba(255,255,255,0.03)", border:"2px dashed rgba(100,116,139,0.4)", color:"#94a3b8" }}>
+                    ¿No encuentras el producto? ＋ Crear producto nuevo
+                  </button>
+                ) : (
+                  <>
+                    <div className="flex items-center justify-between">
+                      <p className="text-white font-semibold text-sm">Crear producto nuevo</p>
+                      <button onClick={()=>{ setShowNewProduct(false); setNpError(""); }} className="text-slate-400 text-xs font-bold active:scale-95">✕ Cancelar</button>
+                    </div>
+                    <p className="text-slate-500 text-[10px]">Se creará en Stel Order con referencia NUEVO- para que Compras lo revise y complete después.</p>
+                    <input type="text" value={npName} onChange={e=>{ setNpName(e.target.value); setNpError(""); }}
+                      placeholder="Nombre del producto (obligatorio)"
+                      className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                      style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                    <div className="flex gap-2">
+                      <input type="text" value={npBarcode} onChange={e=>setNpBarcode(e.target.value)}
+                        placeholder="Código de barras (opcional)"
+                        className="flex-1 rounded-lg px-2.5 py-2 text-sm focus:outline-none"
+                        style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"} />
+                      <button onClick={()=>{ setScanTarget("newprod"); setShowScanner(true); }} title="Escanear código de barras"
+                        className="px-3 py-2 rounded-lg active:scale-95"
+                        style={{ background:"rgba(177,9,37,0.15)", border:"1px solid rgba(177,9,37,0.4)", color:"#f87171" }}>
+                        <Icons.Camera />
+                      </button>
+                    </div>
+                    <select value={npCreator} onChange={e=>{ setNpCreator(e.target.value); setNpError(""); }}
+                      className="w-full rounded-lg px-2.5 py-2 text-sm appearance-none focus:outline-none"
+                      style={inputStyle} onFocus={e=>e.target.style.borderColor=BRAND_RED} onBlur={e=>e.target.style.borderColor="#2d2d2d"}>
+                      <option value="" style={{background:"#0a0a0a"}}>— ¿Quién crea el producto? —</option>
+                      {SOLICITANTES.map(t=><option key={t} style={{background:"#0a0a0a"}}>{t}</option>)}
+                    </select>
+                    {npError && <p className="text-red-400 text-xs font-medium">{npError}</p>}
+                    <button onClick={createNewProduct} disabled={npCreating}
+                      className="w-full py-2.5 font-black text-sm rounded-xl active:scale-95 text-white flex items-center justify-center gap-2"
+                      style={{ background: npCreating ? "rgba(177,9,37,0.4)" : BRAND_GRADIENT }}>
+                      {npCreating ? <><Icons.Spin />Creando producto…</> : "＋ Crear y añadir al pedido"}
+                    </button>
+                  </>
+                )}
+              </div>
 
               <div className="rounded-2xl overflow-hidden" style={cardStyle}>
                 <div className="px-4 py-2.5 flex items-center gap-2" style={{ background: "rgba(14,116,144,0.12)", borderBottom: "1px solid rgba(14,116,144,0.25)" }}>
