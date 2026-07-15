@@ -8,17 +8,19 @@ export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Método no permitido" });
 
   try {
-    const { accessToken, filename, pdfBase64, folderId: existingFolderId } = req.body;
+    const { accessToken, filename, pdfBase64, folderId: existingFolderId, folderName, makePublic } = req.body;
     if (!accessToken || !filename || !pdfBase64) {
       return res.status(400).json({ error: "Faltan parámetros: accessToken, filename, pdfBase64" });
     }
 
     let folderId = existingFolderId;
+    const targetFolderName = folderName || "Nimatel Check App";
 
-    // Buscar o crear carpeta "Nimatel Check App"
+    // Buscar o crear la carpeta destino
     if (!folderId) {
+      const q = `name='${targetFolderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
       const searchResp = await fetch(
-        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent("name='Nimatel Check App' and mimeType='application/vnd.google-apps.folder' and trashed=false")}&fields=files(id)`,
+        `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`,
         { headers: { Authorization: `Bearer ${accessToken}` } }
       );
       const searchData = await searchResp.json();
@@ -29,7 +31,7 @@ export default async function handler(req, res) {
         const folderResp = await fetch("https://www.googleapis.com/drive/v3/files", {
           method: "POST",
           headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-          body: JSON.stringify({ name: "Nimatel Check App", mimeType: "application/vnd.google-apps.folder" }),
+          body: JSON.stringify({ name: targetFolderName, mimeType: "application/vnd.google-apps.folder" }),
         });
         if (!folderResp.ok) throw new Error(`Error creando carpeta: ${folderResp.status}`);
         const folderData = await folderResp.json();
@@ -75,15 +77,18 @@ export default async function handler(req, res) {
     const uploadData = await uploadResp.json();
     if (!uploadData.id) throw new Error("Drive no devolvió ID del archivo");
 
-    // Hacer público
-    await fetch(`https://www.googleapis.com/drive/v3/files/${uploadData.id}/permissions`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ role: "reader", type: "anyone" }),
-    });
+    // Hacer público solo si se solicita (por defecto sí, como hasta ahora)
+    if (makePublic !== false) {
+      await fetch(`https://www.googleapis.com/drive/v3/files/${uploadData.id}/permissions`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ role: "reader", type: "anyone" }),
+      });
+    }
 
     const publicUrl = `https://drive.google.com/uc?export=download&id=${uploadData.id}`;
-    return res.status(200).json({ fileId: uploadData.id, publicUrl, folderId });
+    const viewUrl = `https://drive.google.com/file/d/${uploadData.id}/view`;
+    return res.status(200).json({ fileId: uploadData.id, publicUrl, viewUrl, folderId });
   } catch (err) {
     return res.status(500).json({ error: err.message });
   }
