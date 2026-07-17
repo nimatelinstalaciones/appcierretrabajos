@@ -10,7 +10,7 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.8";
+const APP_VERSION = "V1.9";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
@@ -41,6 +41,27 @@ const loadJsPDF = () => new Promise((resolve, reject) => {
 const urlToBase64 = (url) => fetch(url).then(r => r.blob()).then(blob =>
   new Promise(res => { const r = new FileReader(); r.onloadend = () => res(r.result); r.readAsDataURL(blob); })
 );
+
+// ─── Comprimir foto para el PDF (V1.9) — máx 1280px, JPEG 72% ───────────
+const compressPhoto = (url, maxDim = 1280, quality = 0.72) => new Promise((resolve, reject) => {
+  const img = new Image();
+  img.onload = () => {
+    try {
+      let width = img.width, height = img.height;
+      if (width > maxDim || height > maxDim) {
+        const scale = maxDim / Math.max(width, height);
+        width = Math.round(width * scale);
+        height = Math.round(height * scale);
+      }
+      const canvas = document.createElement("canvas");
+      canvas.width = width; canvas.height = height;
+      canvas.getContext("2d").drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+    } catch (err) { reject(err); }
+  };
+  img.onerror = () => reject(new Error("No se pudo cargar la imagen"));
+  img.src = url;
+});
 
 // ─── Google OAuth ────────────────────────────────────────────────────────
 const SCOPES = "https://www.googleapis.com/auth/drive.file";
@@ -106,30 +127,68 @@ const getGoogleToken = () => new Promise(async (resolve, reject) => {
   }
 });
 
-// ─── Upload PDF to Google Drive (via Vercel proxy) ───────────────────────
-const uploadToDrive = async (pdfBlob, filename, accessToken, extra = {}) => {
-  // Convertir blob a base64 para enviar al proxy
-  const arrayBuffer = await pdfBlob.arrayBuffer();
-  const bytes = new Uint8Array(arrayBuffer);
-  let binary = "";
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  const pdfBase64 = btoa(binary);
+// ─── Upload PDF a Google Drive — directo desde el navegador (V1.9) ───────
+// Subida reanudable de la API de Drive: sin pasar por el proxy de Vercel,
+// por lo que desaparece el límite de 4,5 MB por petición (error HTTP 413).
+const driveApi = async (token, url, options = {}) => {
+  const resp = await fetch(url, { ...options, headers: { Authorization: `Bearer ${token}`, ...(options.headers || {}) } });
+  if (resp.status === 401) {
+    clearGoogleToken();
+    throw new Error("La sesión de Google ha caducado. Vuelve a pulsarlo para autenticarte de nuevo.");
+  }
+  return resp;
+};
 
-  const resp = await fetch("/api/drive-upload", {
+const findOrCreateFolder = async (token, folderName) => {
+  const q = `name='${folderName.replace(/'/g, "\\'")}' and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const searchResp = await driveApi(token, `https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id)`);
+  const searchData = await searchResp.json();
+  if (searchData.files && searchData.files.length > 0) return searchData.files[0].id;
+  const createResp = await driveApi(token, "https://www.googleapis.com/drive/v3/files", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ accessToken, filename, pdfBase64, ...extra }),
+    body: JSON.stringify({ name: folderName, mimeType: "application/vnd.google-apps.folder" }),
   });
-  if (!resp.ok) {
-    const err = await resp.json().catch(() => ({ error: `HTTP ${resp.status}` }));
-    const msg = String(err.error || `Error proxy Drive: ${resp.status}`);
-    if (msg.includes("401") || msg.toLowerCase().includes("invalid credentials") || msg.toLowerCase().includes("unauthorized")) {
-      clearGoogleToken();
-      throw new Error("La sesión de Google ha caducado. Vuelve a pulsarlo para autenticarte de nuevo.");
-    }
-    throw new Error(msg);
+  if (!createResp.ok) throw new Error(`Error creando carpeta en Drive: ${createResp.status}`);
+  const folderData = await createResp.json();
+  return folderData.id;
+};
+
+const uploadToDrive = async (pdfBlob, filename, accessToken, extra = {}) => {
+  const folderName = extra.folderName || "Nimatel Check App";
+  const folderId = await findOrCreateFolder(accessToken, folderName);
+
+  // 1) Iniciar subida reanudable
+  const initResp = await driveApi(accessToken, "https://www.googleapis.com/upload/drive/v3/files?uploadType=resumable&fields=id", {
+    method: "POST",
+    headers: { "Content-Type": "application/json; charset=UTF-8", "X-Upload-Content-Type": "application/pdf" },
+    body: JSON.stringify({ name: filename, mimeType: "application/pdf", parents: [folderId] }),
+  });
+  if (!initResp.ok) throw new Error(`Error iniciando la subida a Drive: ${initResp.status}`);
+  const uploadUrl = initResp.headers.get("Location");
+  if (!uploadUrl) throw new Error("Drive no devolvió la URL de subida");
+
+  // 2) Subir el archivo completo
+  const putResp = await fetch(uploadUrl, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: pdfBlob });
+  if (!putResp.ok) throw new Error(`Error subiendo el archivo a Drive: ${putResp.status}`);
+  const uploadData = await putResp.json();
+  if (!uploadData.id) throw new Error("Drive no devolvió ID del archivo");
+
+  // 3) Hacerlo público solo si se necesita (adjuntos de Stel Order)
+  if (extra.makePublic !== false) {
+    await driveApi(accessToken, `https://www.googleapis.com/drive/v3/files/${uploadData.id}/permissions`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ role: "reader", type: "anyone" }),
+    });
   }
-  return await resp.json(); // { fileId, publicUrl, folderId }
+
+  return {
+    fileId: uploadData.id,
+    publicUrl: `https://drive.google.com/uc?export=download&id=${uploadData.id}`,
+    viewUrl: `https://drive.google.com/file/d/${uploadData.id}/view`,
+    folderId,
+  };
 };
 
 // ─── Get Stel Order document ID (via Vercel proxy) ───────────────────────
@@ -523,7 +582,7 @@ async function buildPDF(data) {
       if (y + imgH + 12 > H - 15) { doc.addPage(); y = 20; }
       const x = M + col * (imgW + 6);
       try {
-        const b64 = await urlToBase64(photo.url);
+        const b64 = await compressPhoto(photo.url).catch(() => urlToBase64(photo.url));
         doc.addImage(b64, x, y, imgW, imgH);
         doc.setFontSize(7); doc.setFont("helvetica", "bold"); doc.setTextColor(50,50,50);
         doc.text(label, x + 1, y + imgH + 3.5);
