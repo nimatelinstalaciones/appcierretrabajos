@@ -10,13 +10,40 @@ const STEL_API_KEY = "256JhK74OuI3kji9tpRLpngRHCSiPdTP66cvAuxx";
 const STEL_BASE = "https://app.stelorder.com/app";
 const BRAND_RED = "#b10925";
 const BRAND_GRADIENT = "linear-gradient(135deg, #bd0048, #b10925)";
-const APP_VERSION = "V1.9";
+const APP_VERSION = "V2.0";
 const SOLICITANTES = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel", "Pedro Eloy", "Antonio Nicolás"];
 const TECHNICIANS = ["Amador García García", "Carlos Campos Hernández", "Francisco Hernández Torrecillas", "Pedro Jiménez Fernández", "Mauricio Giovanni Coronel"];
 const PAYMENT_METHODS = ["No aplica (Factura mensual)", "TPV", "Bizum", "Transferencia", "Efectivo"];
 const DOC_TYPES = ["Albarán", "Presupuesto"];
 const TOTAL_STEPS = 5;
 const MIN_AFTER_PHOTOS = 3;
+
+// ─── V2.0 · Control de Vehículos — datos maestros ────────────────────────
+const VEHICLES = [
+  { marca: "Seat", modelo: "Ibiza ST", matricula: "6849HJT" },
+  { marca: "Ford", modelo: "Tourneo", matricula: "2635HGB" },
+  { marca: "Fiat", modelo: "Dobló", matricula: "9262KZT" },
+  { marca: "Ford", modelo: "Tourneo", matricula: "5166KCZ" },
+  { marca: "Peugeot", modelo: "Partner", matricula: "4555LML" },
+  { marca: "Volkswagen", modelo: "T-ROC", matricula: "7185MBD" },
+];
+const VEHICLE_ITEMS = [
+  { key: "documentacion", label: "Documentación", accion: "Revisar que esté todo" },
+  { key: "neumaticos", label: "Neumáticos", accion: "Verificar desgaste" },
+  { key: "luces", label: "Luces", accion: "Verificar funcionamiento" },
+  { key: "itv", label: "ITV", accion: "Verificar vigencia" },
+  { key: "liquidos", label: "Líquidos", accion: "Verificar niveles" },
+  { key: "limpiezaExterior", label: "Limpieza exterior", accion: "Verificar" },
+  { key: "limpiezaInterior", label: "Limpieza interior", accion: "Verificar" },
+  { key: "organizacion", label: "Organización y orden", accion: "Verificar" },
+  { key: "elementosInteriores", label: "Elementos interiores", accion: "Verificar estado" },
+  { key: "chapaPintura", label: "Chapa y pintura", accion: "Verificar" },
+];
+const itvFechaEsFmt = (iso) => {
+  if (!iso) return "—";
+  const [y, m, d] = iso.split("-");
+  return `${d}/${m}/${y}`;
+};
 
 // ─── Albarán format ──────────────────────────────────────────────────────
 const getDocRef = (orden, docType) => {
@@ -203,6 +230,22 @@ const stelProxy = async (endpoint, method = "GET", body = null) => {
     throw new Error(err.error || err.message || err["developer-message"] || `Error proxy Stel: ${resp.status}`);
   }
   return await resp.json();
+};
+
+// ─── V2.0 · Proxy del módulo de vehículos (Drive/Gmail server-side) ─────
+// Los técnicos NO se autentican en Google en este módulo: el servidor usa
+// el refresh token de nimatelinstalaciones@gmail.com (variables de entorno
+// en Vercel). El PDF se sube directo del navegador a Drive mediante una
+// sesión reanudable creada por el servidor (sin límite de 4,5 MB).
+const vehicleApi = async (payload) => {
+  const resp = await fetch("/api/vehicle", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  const data = await resp.json().catch(() => ({}));
+  if (!resp.ok) throw new Error(data.error || `Error del servidor de vehículos (${resp.status})`);
+  return data;
 };
 
 const getStelDocId = async (orden, docType) => {
@@ -688,6 +731,136 @@ async function buildOrderPDF(data) {
     doc.setPage(p);
     doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(150, 150, 150);
     doc.text(`Nimatel Fibra y Telecomunicaciones — Pedido de material ${data.ref}`, M, H - 6);
+    doc.text(`Pág. ${p} / ${totalPages}`, W - M, H - 6, { align: "right" });
+    doc.setDrawColor(177, 9, 37); doc.line(M, H - 10, W - M, H - 10);
+  }
+  return doc;
+}
+
+// ─── V2.0 · PDF de Control del Vehículo ─────────────────────────────────
+async function buildVehiclePDF(data) {
+  const JsPDF = await loadJsPDF();
+  const doc = new JsPDF({ unit: "mm", format: "a4" });
+  const W = 210, H = 297, M = 14, CW = W - 2 * M;
+  let y = 0;
+  const line = (x1, y1, x2, y2, color = [220, 220, 220]) => { doc.setDrawColor(...color); doc.line(x1, y1, x2, y2); };
+  const secHeader = (title) => {
+    doc.setFillColor(240, 240, 240);
+    doc.rect(M, y - 4, CW, 7, "F");
+    doc.setFontSize(9); doc.setFont("helvetica", "bold"); doc.setTextColor(177, 9, 37);
+    doc.text(title.toUpperCase(), M + 2, y + 0.5);
+    y += 5; line(M, y, M + CW, y, [200, 200, 200]); y += 4;
+  };
+
+  doc.setFillColor(177, 9, 37);
+  doc.rect(0, 0, W, 38, "F");
+  doc.addImage(LOGO_SRC, "PNG", M, 5, 48, 24);
+  doc.setFontSize(12); doc.setFont("helvetica", "bold"); doc.setTextColor(255, 255, 255);
+  doc.text("CONTROL DEL ESTADO DEL VEHÍCULO", W - M, 16, { align: "right" });
+  doc.setFontSize(9); doc.setFont("helvetica", "normal");
+  doc.text(`Matrícula: ${data.vehicle.matricula}`, W - M, 23, { align: "right" });
+  doc.text(`Fecha: ${data.fecha}`, W - M, 29, { align: "right" });
+  y = 46;
+
+  const fRow = (label, val, color = [30, 30, 30]) => {
+    doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(80, 80, 80);
+    doc.text(label, M + 2, y);
+    doc.setFont("helvetica", "bold"); doc.setTextColor(...color);
+    doc.text(String(val), M + CW, y, { align: "right" });
+    y += 5.5; line(M, y - 0.5, M + CW, y - 0.5, [230, 230, 230]);
+  };
+
+  secHeader("1. Datos de la Revisión");
+  fRow("Empleado", data.tecnico);
+  fRow("Fecha", data.fecha);
+  fRow("Vehículo", `${data.vehicle.marca} ${data.vehicle.modelo} — ${data.vehicle.matricula}`);
+  fRow("Próxima ITV", data.itvFechaEs || "—");
+  fRow("Kilómetros actuales", `${data.kmActuales} km`);
+  fRow("Kilómetros próxima revisión", `${data.kmProxima} km`);
+  y += 4;
+
+  secHeader("2. Control del Estado del Vehículo");
+  const cols = { elem: M + 1, accion: M + 44, estado: M + 96, coment: M + 118 };
+  const comWidth = M + CW - cols.coment - 1;
+  doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(80, 80, 80);
+  doc.text("Elemento", cols.elem, y); doc.text("Acción", cols.accion, y);
+  doc.text("Estado", cols.estado, y); doc.text("Comentarios", cols.coment, y);
+  y += 2; line(M, y, M + CW, y, [180, 180, 180]); y += 4.5;
+
+  const tableRow = (elem, accion, estado, comentario) => {
+    const comLines = comentario ? doc.splitTextToSize(comentario, comWidth) : [];
+    const rowH = Math.max(6, comLines.length * 3.8 + 2.2);
+    if (y + rowH > H - 20) { doc.addPage(); y = 20; }
+    doc.setFontSize(8); doc.setFont("helvetica", "bold"); doc.setTextColor(30, 30, 30);
+    doc.text(elem, cols.elem, y);
+    doc.setFont("helvetica", "normal"); doc.setTextColor(90, 90, 90);
+    doc.text(accion, cols.accion, y);
+    doc.setFont("helvetica", "bold");
+    if (estado === true) { doc.setTextColor(22, 163, 74); doc.text("Bien", cols.estado, y); }
+    else if (estado === false) { doc.setTextColor(220, 38, 38); doc.text("MAL", cols.estado, y); }
+    else { doc.setTextColor(150, 150, 150); doc.text("—", cols.estado, y); }
+    if (comLines.length) {
+      doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+      comLines.forEach((l, i) => doc.text(l, cols.coment, y + i * 3.8));
+    }
+    y += rowH; line(M, y - 1.8, M + CW, y - 1.8, [235, 235, 235]);
+  };
+
+  VEHICLE_ITEMS.forEach((it) => {
+    const v = data.items[it.key] || {};
+    tableRow(it.label, it.accion, v.estado, v.estado === false ? (v.comentario || "") : "");
+  });
+  tableRow("Próxima revisión", "Comprobar Kilómetros", null, `Actuales: ${data.kmActuales} km · Próxima revisión: ${data.kmProxima} km`);
+  y += 4;
+
+  if (data.observaciones) {
+    if (y + 20 > H - 20) { doc.addPage(); y = 20; }
+    secHeader("3. Observaciones");
+    doc.setFontSize(8.5); doc.setFont("helvetica", "normal"); doc.setTextColor(30, 30, 30);
+    const obsLines = doc.splitTextToSize(data.observaciones, CW - 4);
+    obsLines.forEach((l) => {
+      if (y > H - 20) { doc.addPage(); y = 20; }
+      doc.text(l, M + 2, y); y += 4.5;
+    });
+    y += 4;
+  }
+
+  const anomalyPhotos = [];
+  VEHICLE_ITEMS.forEach((it) => {
+    const v = data.items[it.key] || {};
+    if (v.estado === false && v.fotos && v.fotos.length) {
+      v.fotos.forEach((p, i) => anomalyPhotos.push({ label: `${it.label} — Foto #${i + 1}`, photo: p }));
+    }
+  });
+
+  if (anomalyPhotos.length > 0) {
+    doc.addPage(); y = 20;
+    secHeader("Fotografías de las Anomalías");
+    const imgW = (CW - 6) / 2, imgH = imgW * 0.7;
+    let col = 0;
+    for (const { label, photo } of anomalyPhotos) {
+      if (y + imgH + 12 > H - 15) { doc.addPage(); y = 20; }
+      const x = M + col * (imgW + 6);
+      try {
+        const b64 = await compressPhoto(photo.url).catch(() => urlToBase64(photo.url));
+        doc.addImage(b64, x, y, imgW, imgH);
+        doc.setFontSize(7); doc.setFont("helvetica", "bold"); doc.setTextColor(50, 50, 50);
+        doc.text(label, x + 1, y + imgH + 3.5);
+      } catch (_) {
+        doc.setFillColor(230, 230, 230); doc.rect(x, y, imgW, imgH, "F");
+        doc.setTextColor(150, 150, 150); doc.setFontSize(8);
+        doc.text("Imagen no disponible", x + 2, y + imgH / 2);
+      }
+      col++;
+      if (col === 2) { col = 0; y += imgH + 12; }
+    }
+  }
+
+  const totalPages = doc.internal.getNumberOfPages();
+  for (let p = 1; p <= totalPages; p++) {
+    doc.setPage(p);
+    doc.setFontSize(7); doc.setFont("helvetica", "normal"); doc.setTextColor(150, 150, 150);
+    doc.text(`Nimatel Fibra y Telecomunicaciones — Control del vehículo ${data.vehicle.matricula} — ${data.fecha}`, M, H - 6);
     doc.text(`Pág. ${p} / ${totalPages}`, W - M, H - 6, { align: "right" });
     doc.setDrawColor(177, 9, 37); doc.line(M, H - 10, W - M, H - 10);
   }
@@ -1966,6 +2139,445 @@ function BarcodeScanner({ onDetect, onClose }) {
   );
 }
 
+// ─── V2.0 · Toggle Bien / Mal ────────────────────────────────────────────
+function VToggle({ value, onChange }) {
+  const opts = [{ v: true, l: "Bien", on: "#16a34a" }, { v: false, l: "Mal", on: "#dc2626" }];
+  return (
+    <div className="flex gap-2">
+      {opts.map(o => (
+        <button key={String(o.v)} onClick={() => onChange(o.v)}
+          className="flex-1 py-2 rounded-lg font-bold text-sm tracking-wide transition-all duration-150 active:scale-95"
+          style={value === o.v
+            ? { background: o.on, color: "white", border: "2px solid transparent" }
+            : { background: "rgba(15,10,11,0.6)", border: "1px solid #374151", color: "#9ca3af" }}>
+          {o.l}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ─── V2.0 · Fila de elemento de revisión del vehículo ───────────────────
+function VehicleItemRow({ item, value, onChange }) {
+  const ref = useRef();
+  const bad = value.estado === false;
+  const addPhotos = (e) => {
+    const files = Array.from(e.target.files); if (!files.length) return;
+    onChange({ ...value, fotos: [...value.fotos, ...files.map(f => ({ name: f.name, url: URL.createObjectURL(f), file: f }))] });
+    e.target.value = "";
+  };
+  const removePhoto = (i) => onChange({ ...value, fotos: value.fotos.filter((_, idx) => idx !== i) });
+  return (
+    <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+      <div className="flex items-start justify-between gap-2">
+        <div className="flex-1">
+          <p className="text-white font-semibold text-sm leading-tight">{item.label}</p>
+          <p className="text-slate-500 text-[10px] mt-0 leading-snug">{item.accion}</p>
+        </div>
+        {value.estado === true  && <span className="text-green-400 mt-0.5 shrink-0"><Icons.Check /></span>}
+        {value.estado === false && <span className="text-red-400 mt-0.5 shrink-0"><Icons.X /></span>}
+      </div>
+      <VToggle value={value.estado} onChange={(v) => onChange({ ...value, estado: v })} />
+      {bad && (
+        <div className="flex flex-col gap-2 mt-1">
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase self-start" style={badgeRed}>Comentario y foto obligatorios</span>
+          <textarea value={value.comentario} onChange={(e) => onChange({ ...value, comentario: e.target.value })}
+            placeholder="Describe la anomalía…" rows={2}
+            className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={inputStyle} />
+          {value.fotos.length > 0 && (
+            <div className="grid grid-cols-3 gap-2">
+              {value.fotos.map((p, i) => (
+                <div key={i} className="relative rounded-xl overflow-hidden aspect-square">
+                  <img src={p.url} alt={`anomalía ${i + 1}`} className="w-full h-full object-cover" />
+                  <div className="absolute inset-0 bg-black/40 flex items-start justify-between p-1">
+                    <span className="text-white text-[10px] font-bold bg-black/50 rounded px-1">#{i + 1}</span>
+                    <button onClick={() => removePhoto(i)} className="text-red-400 bg-black/50 rounded text-[10px] font-bold px-1">✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          <button onClick={() => ref.current.click()}
+            className="flex items-center justify-center gap-3 w-full py-3 rounded-xl transition-all active:scale-95"
+            style={{ background: "rgba(177,9,37,0.08)", border: `2px dashed rgba(177,9,37,0.4)`, color: BRAND_RED }}>
+            <Icons.Camera /><span className="font-bold text-sm">{value.fotos.length === 0 ? "Añadir foto de la anomalía" : "Añadir otra foto"}</span>
+          </button>
+          <input ref={ref} type="file" accept="image/*" multiple className="hidden" onChange={addPhotos} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── V2.0 · Barra de pasos del módulo de vehículos ──────────────────────
+function VStepBar({ current }) {
+  const labels = ["Datos", "Revisión", "Cierre"];
+  return (
+    <div className="flex items-center justify-between px-0.5">
+      {labels.map((l, i) => {
+        const s = i + 1, done = s < current, active = s === current;
+        return (
+          <div key={l} className="flex flex-col items-center gap-0.5 flex-1">
+            <div className="flex items-center w-full">
+              <div className="w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 transition-all"
+                style={done ? { background: BRAND_RED, color: "white" } : active ? { background: "white", color: BRAND_RED } : { background: "#1e1e1e", color: "#6b7280" }}>
+                {done ? "✓" : s}
+              </div>
+              {i < labels.length - 1 && <div className="flex-1 h-px mx-0.5 rounded transition-all" style={{ background: done ? BRAND_RED : "#2d2d2d" }} />}
+            </div>
+            <span className="text-[8px] font-semibold tracking-wide uppercase leading-none"
+              style={{ color: active ? "white" : done ? BRAND_RED : "#4b5563" }}>{l}</span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── V2.0 · Módulo Control de Vehículos ─────────────────────────────────
+function VehicleApp({ onHome }) {
+  const today = new Date().toLocaleDateString("es-ES", { day: "2-digit", month: "2-digit", year: "numeric" });
+  const emptyItems = () => Object.fromEntries(VEHICLE_ITEMS.map(it => [it.key, { estado: null, comentario: "", fotos: [] }]));
+
+  const [step, setStep] = useState(1);
+  const [error, setError] = useState("");
+  const [phase, setPhase] = useState("form"); // form | done
+  const [tecnico, setTecnico] = useState("");
+  const [vehiculo, setVehiculo] = useState(""); // matrícula
+  const [itvConfig, setItvConfig] = useState(null); // {matricula: "YYYY-MM-DD"} · null = cargando
+  const [itvError, setItvError] = useState("");
+  const [itvFecha, setItvFecha] = useState(""); // YYYY-MM-DD
+  const [items, setItems] = useState(emptyItems);
+  const [kmActuales, setKmActuales] = useState("");
+  const [kmProxima, setKmProxima] = useState("");
+  const [observaciones, setObservaciones] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [busyMsg, setBusyMsg] = useState("");
+  const [finishError, setFinishError] = useState("");
+  const [pdfViewUrl, setPdfViewUrl] = useState("");
+  const [savedFilename, setSavedFilename] = useState("");
+  const [mailSent, setMailSent] = useState(false);
+
+  const vehicle = VEHICLES.find(v => v.matricula === vehiculo) || null;
+  const anomalies = VEHICLE_ITEMS
+    .filter(it => items[it.key].estado === false)
+    .map(it => ({ elemento: it.label, comentario: items[it.key].comentario.trim() }));
+
+  // Cargar itv_config.json de Drive al entrar al módulo
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const data = await vehicleApi({ action: "itv-get" });
+        if (alive) { setItvConfig(data.config || {}); setItvError(""); }
+      } catch (err) {
+        if (alive) { setItvConfig({}); setItvError("No se pudo leer la configuración de ITV: " + (err.message || "")); }
+      }
+    })();
+    return () => { alive = false; };
+  }, []);
+
+  const selectVehicle = (m) => {
+    setVehiculo(m);
+    setItvFecha(itvConfig && itvConfig[m] ? itvConfig[m] : "");
+  };
+
+  const itvStatus = (() => {
+    if (!itvFecha) return null;
+    const d = new Date(itvFecha + "T00:00:00");
+    const now = new Date(); now.setHours(0, 0, 0, 0);
+    const days = Math.round((d - now) / 86400000);
+    if (days < 0) return { color: "#dc2626", bg: "rgba(220,38,38,0.12)", msg: `⚠ ITV VENCIDA el ${itvFechaEsFmt(itvFecha)}` };
+    if (days <= 30) return { color: "#f59e0b", bg: "rgba(245,158,11,0.12)", msg: `⚠ ITV próxima a vencer: ${itvFechaEsFmt(itvFecha)} (quedan ${days} días)` };
+    return { color: "#16a34a", bg: "rgba(22,163,74,0.1)", msg: `ITV en vigor hasta ${itvFechaEsFmt(itvFecha)}` };
+  })();
+
+  const validate = () => {
+    if (step === 1) {
+      if (!tecnico) return "Selecciona el técnico.";
+      if (!vehiculo) return "Selecciona el vehículo.";
+      if (itvConfig === null) return "Espera un momento: cargando la configuración de ITV…";
+      if (!itvFecha) return "Introduce la fecha de la próxima ITV (está en la documentación del vehículo).";
+    }
+    if (step === 2) {
+      for (const it of VEHICLE_ITEMS) {
+        const v = items[it.key];
+        if (v.estado === null) return `Marca el estado de "${it.label}".`;
+        if (v.estado === false) {
+          if (!v.comentario.trim()) return `Describe la anomalía de "${it.label}".`;
+          if (v.fotos.length === 0) return `Adjunta al menos una foto de la anomalía de "${it.label}".`;
+        }
+      }
+      if (!String(kmActuales).trim()) return "Introduce los kilómetros actuales.";
+      if (!String(kmProxima).trim()) return "Introduce los kilómetros de la próxima revisión.";
+    }
+    return "";
+  };
+
+  const next = () => { const e = validate(); if (e) { setError(e); return; } setError(""); setStep(s => s + 1); };
+  const back = () => { setError(""); setStep(s => Math.max(1, s - 1)); };
+  const reset = () => {
+    setStep(1); setError(""); setPhase("form"); setTecnico(""); setVehiculo(""); setItvFecha("");
+    setItems(emptyItems()); setKmActuales(""); setKmProxima(""); setObservaciones("");
+    setFinishError(""); setPdfViewUrl(""); setSavedFilename(""); setMailSent(false); setBusyMsg("");
+  };
+
+  const finish = async () => {
+    setFinishError(""); setBusy(true);
+    try {
+      const filename = `Control_${vehicle.matricula}_${today.replace(/\//g, "")}.pdf`;
+      setBusyMsg("Generando PDF…");
+      const doc = await buildVehiclePDF({
+        tecnico, fecha: today, vehicle,
+        itvFecha, itvFechaEs: itvFechaEsFmt(itvFecha),
+        kmActuales: String(kmActuales).trim(), kmProxima: String(kmProxima).trim(),
+        items, observaciones: observaciones.trim(),
+      });
+      const blob = doc.output("blob");
+
+      // Guardar fecha de ITV si es nueva o ha cambiado (no bloquea el cierre)
+      if (itvConfig && itvConfig[vehicle.matricula] !== itvFecha) {
+        setBusyMsg("Guardando fecha de ITV…");
+        try {
+          const upd = await vehicleApi({ action: "itv-set", matricula: vehicle.matricula, fecha: itvFecha });
+          setItvConfig(upd.config || { ...itvConfig, [vehicle.matricula]: itvFecha });
+        } catch (_) {}
+      }
+
+      setBusyMsg("Subiendo PDF a Drive…");
+      const sess = await vehicleApi({ action: "upload-session", filename });
+      if (!sess.uploadUrl) throw new Error("El servidor no devolvió la URL de subida a Drive.");
+      const putResp = await fetch(sess.uploadUrl, { method: "PUT", headers: { "Content-Type": "application/pdf" }, body: blob });
+      if (!putResp.ok) throw new Error(`Error subiendo el PDF a Drive: ${putResp.status}`);
+      const uploaded = await putResp.json();
+      if (!uploaded.id) throw new Error("Drive no devolvió el ID del archivo.");
+      setPdfViewUrl(`https://drive.google.com/file/d/${uploaded.id}/view`);
+      setSavedFilename(filename);
+
+      if (anomalies.length > 0) {
+        setBusyMsg("Enviando aviso de anomalías por correo…");
+        await vehicleApi({ action: "send-mail", fileId: uploaded.id, filename, matricula: vehicle.matricula, tecnico, anomalies });
+        setMailSent(true);
+      }
+      setPhase("done");
+    } catch (err) {
+      setFinishError(err.message || "Error finalizando la revisión.");
+    } finally { setBusy(false); setBusyMsg(""); }
+  };
+
+  const titles = ["", "Datos de la Revisión", "Control del Estado", "Cierre de la Revisión"];
+  const subtitles = ["", "Técnico, vehículo e ITV", "Marca cada elemento: Bien o Mal", "Resumen, observaciones y envío"];
+
+  return (
+    <div className="min-h-screen flex items-start justify-center" style={{ background: "#090608", fontFamily: "'Trebuchet MS','Avenir',sans-serif" }}>
+      <div className="w-full max-w-md min-h-screen flex flex-col" style={{ background: "#0f0a0b" }}>
+
+        <div className="px-3 py-2 sticky top-0 z-10 flex flex-col gap-1.5" style={{ background: "rgba(15,10,11,0.97)", backdropFilter: "blur(12px)", borderBottom: "1px solid rgba(177,9,37,0.2)" }}>
+          <div className="flex items-center gap-2">
+            <img src={LOGO_SRC} alt="Nimatel" className="h-6 w-auto object-contain shrink-0" />
+            <div className="flex-1 min-w-0">
+              <p className="text-white font-black text-sm leading-tight truncate">Control de Vehículos</p>
+              <p className="text-slate-500 text-[10px] leading-tight">{today} · <span className="font-bold" style={{ color: BRAND_RED }}>{APP_VERSION}</span></p>
+            </div>
+            <button onClick={onHome} className="text-slate-400 text-[11px] font-bold px-2 py-1 rounded-lg" style={{ border: "1px solid #2d2d2d" }}>Inicio</button>
+          </div>
+          {phase === "form" && <VStepBar current={step} />}
+        </div>
+
+        {phase === "done" ? (
+          <div className="flex-1 flex flex-col items-center justify-center px-6 gap-4 py-10">
+            <div className="w-16 h-16 rounded-full flex items-center justify-center" style={{ background: "rgba(22,163,74,0.15)", border: "2px solid #16a34a", color: "#16a34a" }}>
+              <Icons.ClipOk />
+            </div>
+            <div className="text-center">
+              <h2 className="text-white font-black text-lg">Revisión registrada</h2>
+              <p className="text-slate-400 text-sm mt-1">{vehicle ? `${vehicle.marca} ${vehicle.modelo} — ${vehicle.matricula}` : ""}</p>
+            </div>
+            <div className="w-full rounded-xl p-3 flex flex-col gap-2" style={cardStyle}>
+              <p className="text-sm font-semibold text-green-400">✓ {savedFilename} guardado en Drive · "Control de Vehículos"</p>
+              {pdfViewUrl && (
+                <a href={pdfViewUrl} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 text-sky-400 text-sm font-semibold">
+                  <Icons.Link /> Ver PDF en Drive
+                </a>
+              )}
+              {anomalies.length > 0 && (
+                <p className="text-sm font-semibold" style={{ color: mailSent ? "#16a34a" : "#f59e0b" }}>
+                  {mailSent ? `✓ Aviso enviado a info@nimatel.es (${anomalies.length} anomalía${anomalies.length > 1 ? "s" : ""})` : "El aviso por correo no se pudo confirmar."}
+                </p>
+              )}
+              {anomalies.length === 0 && <p className="text-slate-400 text-xs">Sin anomalías: no se envía aviso por correo.</p>}
+            </div>
+            <button onClick={reset} className="w-full py-3 font-black text-sm rounded-xl active:scale-95 text-white" style={{ background: BRAND_GRADIENT }}>
+              Nueva revisión
+            </button>
+            <button onClick={onHome} className="w-full py-3 font-bold text-sm rounded-xl text-slate-300" style={{ border: "1px solid #2d2d2d" }}>
+              Volver al inicio
+            </button>
+          </div>
+        ) : (
+          <>
+            <div className="px-3 pt-3 pb-1">
+              <h2 className="text-white font-black text-base leading-tight">{titles[step]}</h2>
+              <p className="text-slate-500 text-xs">{subtitles[step]}</p>
+            </div>
+
+            <div className="flex-1 px-3 py-2 flex flex-col gap-2 overflow-y-auto">
+              {step === 1 && (
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                    <label className="text-white font-semibold text-sm flex items-center gap-2">
+                      Técnico <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                    </label>
+                    <select value={tecnico} onChange={e => setTecnico(e.target.value)}
+                      className="w-full rounded-lg px-2.5 py-2 text-sm appearance-none focus:outline-none"
+                      style={inputStyle} onFocus={e => e.target.style.borderColor = BRAND_RED} onBlur={e => e.target.style.borderColor = "#2d2d2d"}>
+                      <option value="" style={{ background: "#0a0a0a" }}>— Seleccionar técnico —</option>
+                      {SOLICITANTES.map(t => <option key={t} style={{ background: "#0a0a0a" }}>{t}</option>)}
+                    </select>
+                  </div>
+
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                    <label className="text-white font-semibold text-sm flex items-center gap-2">
+                      Vehículo <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                    </label>
+                    <select value={vehiculo} onChange={e => selectVehicle(e.target.value)}
+                      className="w-full rounded-lg px-2.5 py-2 text-sm appearance-none focus:outline-none"
+                      style={inputStyle} onFocus={e => e.target.style.borderColor = BRAND_RED} onBlur={e => e.target.style.borderColor = "#2d2d2d"}>
+                      <option value="" style={{ background: "#0a0a0a" }}>— Seleccionar vehículo —</option>
+                      {VEHICLES.map(v => (
+                        <option key={v.matricula} value={v.matricula} style={{ background: "#0a0a0a" }}>
+                          {v.marca} {v.modelo} — {v.matricula}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {vehiculo && (
+                    <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                      <label className="text-white font-semibold text-sm flex items-center gap-2">
+                        Fecha próxima ITV <span className="text-[10px] font-bold px-1.5 py-0.5 rounded-full tracking-widest uppercase" style={badgeRed}>Obligatorio</span>
+                      </label>
+                      {itvConfig === null ? (
+                        <p className="text-slate-400 text-xs flex items-center gap-2"><Icons.Spin /> Cargando configuración de ITV…</p>
+                      ) : (
+                        <>
+                          {!itvConfig[vehiculo] && (
+                            <p className="text-slate-500 text-[10px]">Primera revisión de este vehículo en la app: introduce la fecha de la próxima ITV (la encontrarás en la documentación). Quedará guardada para las siguientes revisiones.</p>
+                          )}
+                          <input type="date" value={itvFecha} onChange={e => setItvFecha(e.target.value)}
+                            className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none" style={inputStyle} />
+                          {itvStatus && (
+                            <p className="text-xs font-bold rounded-lg px-2.5 py-1.5" style={{ color: itvStatus.color, background: itvStatus.bg }}>{itvStatus.msg}</p>
+                          )}
+                          {itvError && <p className="text-[10px] text-amber-400">{itvError}</p>}
+                        </>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {step === 2 && (
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-lg px-2.5 py-1.5 flex items-center gap-2" style={{ background: "rgba(177,9,37,0.1)", border: "1px solid rgba(177,9,37,0.2)" }}>
+                    <span>🚐</span><p className="text-xs font-semibold text-red-300">{vehicle ? `${vehicle.marca} ${vehicle.modelo} — ${vehicle.matricula}` : ""} · Si algo está MAL: comentario + foto</p>
+                  </div>
+                  {VEHICLE_ITEMS.map(it => (
+                    <VehicleItemRow key={it.key} item={it} value={items[it.key]}
+                      onChange={(v) => setItems(prev => ({ ...prev, [it.key]: v }))} />
+                  ))}
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                    <div>
+                      <p className="text-white font-semibold text-sm leading-tight">Próxima revisión</p>
+                      <p className="text-slate-500 text-[10px]">Comprobar kilómetros</p>
+                    </div>
+                    <div className="flex gap-2">
+                      <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-slate-400 text-[10px] font-bold uppercase tracking-wide">Km actuales</label>
+                        <input type="number" inputMode="numeric" value={kmActuales} onChange={e => setKmActuales(e.target.value)}
+                          placeholder="p. ej. 84500" className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none" style={inputStyle} />
+                      </div>
+                      <div className="flex-1 flex flex-col gap-1">
+                        <label className="text-slate-400 text-[10px] font-bold uppercase tracking-wide">Km próx. revisión</label>
+                        <input type="number" inputMode="numeric" value={kmProxima} onChange={e => setKmProxima(e.target.value)}
+                          placeholder="p. ej. 95000" className="w-full rounded-lg px-2.5 py-2 text-sm focus:outline-none" style={inputStyle} />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {step === 3 && (
+                <div className="flex flex-col gap-2">
+                  <div className="rounded-xl p-3 flex flex-col gap-1.5" style={cardStyle}>
+                    <p className="text-white font-black text-sm">Resumen</p>
+                    <p className="text-slate-300 text-xs">Técnico: <span className="font-bold text-white">{tecnico}</span></p>
+                    <p className="text-slate-300 text-xs">Vehículo: <span className="font-bold text-white">{vehicle ? `${vehicle.marca} ${vehicle.modelo} — ${vehicle.matricula}` : "—"}</span></p>
+                    <p className="text-slate-300 text-xs">Próxima ITV: <span className="font-bold text-white">{itvFechaEsFmt(itvFecha)}</span></p>
+                    <p className="text-slate-300 text-xs">Kilómetros: <span className="font-bold text-white">{kmActuales} km</span> · Próx. revisión: <span className="font-bold text-white">{kmProxima} km</span></p>
+                    {anomalies.length === 0 ? (
+                      <p className="text-green-400 text-xs font-bold mt-1">✓ Todo en orden: sin anomalías</p>
+                    ) : (
+                      <div className="mt-1">
+                        <p className="text-red-400 text-xs font-bold">✗ {anomalies.length} anomalía{anomalies.length > 1 ? "s" : ""} detectada{anomalies.length > 1 ? "s" : ""}:</p>
+                        {anomalies.map((a, i) => (
+                          <p key={i} className="text-slate-300 text-xs ml-2 mt-0.5">• <span className="font-bold text-white">{a.elemento}</span>: {a.comentario}</p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="rounded-xl p-2.5 flex flex-col gap-2" style={cardStyle}>
+                    <label className="text-white font-semibold text-sm">Observaciones <span className="text-[10px] font-bold text-slate-400 bg-white/5 border border-white/10 px-1.5 py-0.5 rounded-full tracking-widest uppercase ml-1">Opcional</span></label>
+                    <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)} rows={3}
+                      placeholder="Observaciones generales de la revisión…"
+                      className="w-full rounded-xl px-3 py-2 text-sm outline-none resize-none" style={inputStyle} />
+                  </div>
+
+                  {anomalies.length > 0 && (
+                    <div className="rounded-lg px-2.5 py-2 flex items-start gap-2" style={{ background: "rgba(245,158,11,0.1)", border: "1px solid rgba(245,158,11,0.3)" }}>
+                      <span>📧</span>
+                      <p className="text-xs font-semibold text-amber-400">Al finalizar se enviará un aviso automático a info@nimatel.es con el PDF adjunto (asunto: "Fallo en vehículo").</p>
+                    </div>
+                  )}
+
+                  <Alert msg={finishError} />
+
+                  <button onClick={finish} disabled={busy}
+                    className="w-full py-3.5 font-black text-sm rounded-xl active:scale-95 text-white flex items-center justify-center gap-2 disabled:opacity-60"
+                    style={{ background: BRAND_GRADIENT }}>
+                    {busy ? (<><Icons.Spin /><span>{busyMsg || "Procesando…"}</span></>) : (<><Icons.PDF /><span>Finalizar: PDF + Drive{anomalies.length > 0 ? " + Aviso" : ""}</span></>)}
+                  </button>
+                </div>
+              )}
+
+              <Alert msg={error} />
+            </div>
+
+            <div className="px-3 pb-4 pt-2 flex gap-2" style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+              {step > 1 && (
+                <button onClick={back} disabled={busy}
+                  className="flex-1 py-3 font-bold text-sm rounded-xl text-slate-300 flex items-center justify-center gap-1 disabled:opacity-60"
+                  style={{ border: "1px solid #2d2d2d" }}>
+                  <Icons.ChevL /> Atrás
+                </button>
+              )}
+              {step < 3 && (
+                <button onClick={next}
+                  className="flex-1 py-3 font-black text-sm rounded-xl active:scale-95 text-white flex items-center justify-center gap-1"
+                  style={{ background: BRAND_GRADIENT }}>
+                  Siguiente <Icons.ChevR />
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ─── V1.3 · Pantalla de inicio ───────────────────────────────────────────
 function HomeMenu({ onSelect }) {
   const today = new Date().toLocaleDateString("es-ES", { day:"2-digit", month:"2-digit", year:"numeric" });
@@ -2001,6 +2613,16 @@ function HomeMenu({ onSelect }) {
               </div>
               <span className="text-sky-400"><Icons.ChevR /></span>
             </button>
+            <button onClick={()=>onSelect("vehiculo")}
+              className="w-full rounded-2xl p-4 flex items-center gap-4 text-left active:scale-95 transition-all"
+              style={{ background:"rgba(202,138,4,0.1)", border:"1px solid rgba(202,138,4,0.35)" }}>
+              <span className="text-3xl">🚐</span>
+              <div className="flex-1">
+                <p className="text-white font-black text-base leading-tight">Control de vehículos</p>
+                <p className="text-slate-400 text-xs mt-0.5">Revisión del estado del vehículo con PDF en Drive y aviso de anomalías</p>
+              </div>
+              <span className="text-amber-400"><Icons.ChevR /></span>
+            </button>
           </div>
         </div>
         <p className="text-center text-[10px] text-slate-600 pb-4">Nimatel Fibra y Telecomunicaciones</p>
@@ -2011,8 +2633,9 @@ function HomeMenu({ onSelect }) {
 
 // ─── V1.3 · App raíz con menú de módulos ─────────────────────────────────
 export default function App() {
-  const [module, setModule] = useState(null); // null | "checklist" | "material"
+  const [module, setModule] = useState(null); // null | "checklist" | "material" | "vehiculo"
   if (module === "checklist") return <ChecklistApp onHome={() => setModule(null)} />;
   if (module === "material") return <MaterialApp onHome={() => setModule(null)} />;
+  if (module === "vehiculo") return <VehicleApp onHome={() => setModule(null)} />;
   return <HomeMenu onSelect={setModule} />;
 }
